@@ -1,5 +1,7 @@
 import { isAppDevelopment } from "@/lib/app-env";
 import type {
+  JustPrintAddToCartMessage,
+  JustPrintCartErrorMessage,
   JustPrintCompletionMessage,
   ShopifyQueryParams,
 } from "@/types/configurator";
@@ -53,9 +55,64 @@ export function isAllowedParentOrigin(
 }
 
 /**
+ * Whether an incoming parent message may be handled.
+ * Production: strict allow-list only.
+ * Development: also accept http(s) parent origins (local Shopify theme embeds).
+ */
+export function canAcceptParentMessage(
+  origin: string,
+  allowedParentOrigins: readonly string[],
+): boolean {
+  if (isAllowedParentOrigin(origin, allowedParentOrigins)) {
+    return true;
+  }
+
+  if (!isAppDevelopment()) {
+    return false;
+  }
+
+  return /^https?:\/\//.test(origin);
+}
+
+function resolveParentOriginFromAncestors(
+  allowedParentOrigins: readonly string[],
+): string | null {
+  if (typeof window === "undefined") return null;
+
+  const ancestors = window.location.ancestorOrigins;
+  if (!ancestors || ancestors.length === 0) return null;
+
+  for (let i = 0; i < ancestors.length; i += 1) {
+    const origin = ancestors.item(i);
+    if (origin && isAllowedParentOrigin(origin, allowedParentOrigins)) {
+      return origin;
+    }
+  }
+
+  return null;
+}
+
+function resolveParentOriginFromReferrer(
+  allowedParentOrigins: readonly string[],
+): string | null {
+  if (typeof window === "undefined" || !document.referrer) return null;
+
+  try {
+    const referrerOrigin = new URL(document.referrer).origin;
+    if (isAllowedParentOrigin(referrerOrigin, allowedParentOrigins)) {
+      return referrerOrigin;
+    }
+  } catch {
+    // Ignore malformed referrer URLs.
+  }
+
+  return null;
+}
+
+/**
  * Target origin for outgoing postMessage to the parent frame.
  *
- * - Prefer a known allowed parent origin (from referrer when it matches).
+ * - Prefer a known allowed parent origin (ancestorOrigins, then referrer).
  * - Development only: fall back to "*" so local iframe embeds still work
  *   without a real parent shop domain.
  * - Production: never use "*"; use a matched allowed origin or the first
@@ -64,16 +121,11 @@ export function isAllowedParentOrigin(
 export function resolveOutgoingPostMessageTarget(
   allowedParentOrigins: readonly string[],
 ): string {
-  if (typeof window !== "undefined" && document.referrer) {
-    try {
-      const referrerOrigin = new URL(document.referrer).origin;
-      if (isAllowedParentOrigin(referrerOrigin, allowedParentOrigins)) {
-        return referrerOrigin;
-      }
-    } catch {
-      // Ignore malformed referrer URLs.
-    }
-  }
+  const fromAncestors = resolveParentOriginFromAncestors(allowedParentOrigins);
+  if (fromAncestors) return fromAncestors;
+
+  const fromReferrer = resolveParentOriginFromReferrer(allowedParentOrigins);
+  if (fromReferrer) return fromReferrer;
 
   // DEV ONLY: "*" is allowed so local demos / iframe sandboxes can receive
   // completion events without a real Shopify parent. Production must always
@@ -97,4 +149,29 @@ export function notifyParentConfigurationCompleted(
 
   const targetOrigin = resolveOutgoingPostMessageTarget(allowedParentOrigins);
   window.parent.postMessage(message, targetOrigin);
+}
+
+/**
+ * Asks the parent Shopify page to add the configured kit to the cart.
+ * The Storefront never calls Shopify Cart APIs itself.
+ */
+export function notifyParentAddToCart(
+  message: JustPrintAddToCartMessage,
+  allowedParentOrigins: readonly string[] = [],
+): void {
+  if (typeof window === "undefined") return;
+
+  const targetOrigin = resolveOutgoingPostMessageTarget(allowedParentOrigins);
+  window.parent.postMessage(message, targetOrigin);
+}
+
+export function isJustPrintCartErrorMessage(
+  data: unknown,
+): data is JustPrintCartErrorMessage {
+  if (typeof data !== "object" || data === null) return false;
+  const record = data as Record<string, unknown>;
+  return (
+    record.type === "JUSTPRINT_CART_ERROR" &&
+    typeof record.message === "string"
+  );
 }

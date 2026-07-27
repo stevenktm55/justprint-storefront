@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ConfiguratorHeader } from "@/components/configurator/ConfiguratorHeader";
 import { DesktopPreview } from "@/components/configurator/DesktopPreview";
@@ -28,23 +28,27 @@ import { useConfigurator } from "@/context/ConfiguratorContext";
 import { useStorefront } from "@/context/StorefrontContext";
 import { useStorefrontTenant } from "@/context/StorefrontTenantContext";
 import {
-  buildCompletionSummary,
+  buildAddToCartSummary,
   buildShopifyCartSummary,
   formatBikeLabel,
   getDesignName,
+  isConfigurationReadyForCart,
 } from "@/lib/cart-summary";
 import { generateConfigurationId } from "@/lib/configuration-id";
 import { addGarageBike, loadGarageBikes } from "@/lib/garage";
 import { justPrintClient, isJustPrintError } from "@/lib/justprint-client";
 import { saveDraft, saveCompletedConfiguration } from "@/lib/storage";
 import {
-  notifyParentConfigurationCompleted,
+  canAcceptParentMessage,
+  isEmbeddedInIframe,
+  isJustPrintCartErrorMessage,
+  notifyParentAddToCart,
   readShopifyQueryParams,
 } from "@/lib/shopify-bridge";
 import type {
-  ConfigurationCompletionSummary,
   ConfiguratorStep,
-  JustPrintCompletionMessage,
+  JustPrintAddToCartMessage,
+  ShopifyCartSummary,
 } from "@/types/configurator";
 
 const PRIMARY_LABELS: Record<ConfiguratorStep, string> = {
@@ -52,8 +56,12 @@ const PRIMARY_LABELS: Record<ConfiguratorStep, string> = {
   2: "Personnaliser ce design",
   3: "Ajouter mes logos",
   4: "Voir mon kit final",
-  5: "Ajouter au panier — Démo",
+  5: "Ajouter au panier",
 };
+
+const OUTSIDE_IFRAME_CART_MESSAGE =
+  "Ouvre le configurateur depuis la boutique RawMoto pour ajouter ce kit au panier.";
+
 
 function SyncStatusBadge({
   status,
@@ -116,21 +124,41 @@ export function ConfiguratorShell() {
   const [quitOpen, setQuitOpen] = useState(false);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
-  const [successOpen, setSuccessOpen] = useState(false);
+  const [outsideIframeOpen, setOutsideIframeOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [addingToCart, setAddingToCart] = useState(false);
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [cartSummary, setCartSummary] = useState(() =>
+  const [cartSummary, setCartSummary] = useState<ShopifyCartSummary>(() =>
     buildShopifyCartSummary(state, state.configurationId ?? "—"),
   );
-  const [completionSummary, setCompletionSummary] =
-    useState<ConfigurationCompletionSummary | null>(null);
 
   const shopifyParams = useMemo(
     () => readShopifyQueryParams(searchParams),
     [searchParams],
   );
+
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      if (!canAcceptParentMessage(event.origin, allowedParentOrigins)) {
+        return;
+      }
+
+      if (!isJustPrintCartErrorMessage(event.data)) {
+        return;
+      }
+
+      setAddingToCart(false);
+      setActionError(
+        event.data.message ||
+          "Impossible d’ajouter ce kit au panier. Tu peux réessayer.",
+      );
+    }
+
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [allowedParentOrigins]);
 
   const showStickyMobilePreview =
     state.currentStep === 3 || state.currentStep === 4;
@@ -151,9 +179,24 @@ export function ConfiguratorShell() {
     }
   }, [state]);
 
-  const handleAddToCartDemo = useCallback(async () => {
-    setLoading(true);
+  const handleAddToCart = useCallback(async () => {
+    if (addingToCart) return;
+
     setActionError(null);
+
+    if (!isConfigurationReadyForCart(state)) {
+      setActionError(
+        "Configuration incomplète. Vérifie ta moto, ton design et ton numéro.",
+      );
+      return;
+    }
+
+    if (!isEmbeddedInIframe()) {
+      setOutsideIframeOpen(true);
+      return;
+    }
+
+    setAddingToCart(true);
 
     try {
       const configurationId =
@@ -165,28 +208,19 @@ export function ConfiguratorShell() {
         dispatch({ type: "SET_CONFIGURATION_ID", payload: configurationId });
       }
 
-      const completion = await justPrintClient.completeConfigurationFromState({
-        ...state,
-        configurationId,
-      });
-
-      const summary = buildCompletionSummary({
-        ...state,
-        configurationId,
-      });
+      const variantId = shopifyParams.variant;
+      const summary = buildAddToCartSummary({ ...state, configurationId });
       const shopifySummary = buildShopifyCartSummary(
         { ...state, configurationId },
         configurationId,
+        variantId,
       );
 
-      const message: JustPrintCompletionMessage = {
-        type: "JUSTPRINT_CONFIGURATION_COMPLETED",
-        configurationId: completion.configurationId,
-        variantId: null,
-        previewUrl: completion.previewUrl,
-        previewMode: completion.previewMode,
-        productionStatus: "ready",
-        source: "rawmoto-local-demo",
+      const message: JustPrintAddToCartMessage = {
+        type: "JUSTPRINT_ADD_TO_CART",
+        configurationId,
+        variantId,
+        source: "justprint-storefront",
         summary,
       };
 
@@ -196,25 +230,29 @@ export function ConfiguratorShell() {
       });
       saveDraft({ ...state, configurationId });
       setCartSummary(shopifySummary);
-      setCompletionSummary(summary);
 
-      notifyParentConfigurationCompleted(message, allowedParentOrigins);
-      setSuccessOpen(true);
+      notifyParentAddToCart(message, allowedParentOrigins);
     } catch (error) {
       const message = isJustPrintError(error)
         ? error.userMessage
-        : "Impossible de finaliser la configuration. Tes choix sont conservés.";
+        : "Impossible de préparer l’ajout au panier. Tes choix sont conservés.";
       setActionError(message);
-    } finally {
-      setLoading(false);
+      setAddingToCart(false);
     }
-  }, [allowedParentOrigins, dispatch, ensureConfiguration, state]);
+  }, [
+    addingToCart,
+    allowedParentOrigins,
+    dispatch,
+    ensureConfiguration,
+    shopifyParams.variant,
+    state,
+  ]);
 
   const handlePrimaryAction = useCallback(async () => {
     if (!canProceed) return;
 
     if (state.currentStep === 5) {
-      await handleAddToCartDemo();
+      await handleAddToCart();
       return;
     }
 
@@ -282,7 +320,7 @@ export function ConfiguratorShell() {
     dispatch,
     ensureConfiguration,
     goNext,
-    handleAddToCartDemo,
+    handleAddToCart,
     state,
   ]);
 
@@ -330,10 +368,11 @@ export function ConfiguratorShell() {
       ? "Voir mon kit final"
       : PRIMARY_LABELS[state.currentStep];
 
+  const primaryBusy = loading || addingToCart;
   const loadingLabel =
     state.currentStep === 4
       ? "Préparation de ton kit…"
-      : state.currentStep === 5
+      : state.currentStep === 5 || addingToCart
         ? "Ajout au panier…"
         : "Chargement…";
 
@@ -414,8 +453,8 @@ export function ConfiguratorShell() {
           {state.currentStep === 4 ? <LogosStep /> : null}
           {state.currentStep === 5 ? (
             <PreviewStep
-              onAddToCart={() => void handleAddToCartDemo()}
-              addingToCart={loading && state.currentStep === 5}
+              onAddToCart={() => void handleAddToCart()}
+              addingToCart={addingToCart}
               onSave={() => void handleSaveDraft()}
               saving={saving}
             />
@@ -438,15 +477,15 @@ export function ConfiguratorShell() {
       <StickyActionBar
         label={primaryLabel}
         onClick={() => void handlePrimaryAction()}
-        disabled={!canProceed}
-        loading={loading}
+        disabled={!canProceed || addingToCart}
+        loading={primaryBusy}
         loadingLabel={loadingLabel}
         secondaryLabel={state.currentStep === 5 ? "Sauvegarder" : undefined}
         onSecondaryClick={
           state.currentStep === 5 ? () => void handleSaveDraft() : undefined
         }
         secondaryLoading={saving}
-        secondaryDisabled={loading}
+        secondaryDisabled={primaryBusy}
       />
 
       <BottomSheet
@@ -515,22 +554,20 @@ export function ConfiguratorShell() {
       </BottomSheet>
 
       <BottomSheet
-        open={successOpen}
-        title="Ajouté au panier — Démo"
-        onClose={() => setSuccessOpen(false)}
+        open={outsideIframeOpen}
+        title="Ajout au panier"
+        onClose={() => setOutsideIframeOpen(false)}
         footer={
           <button
             type="button"
             className="rm-btn-primary"
-            onClick={() => setSuccessOpen(false)}
+            onClick={() => setOutsideIframeOpen(false)}
           >
-            Fermer
+            Compris
           </button>
         }
       >
-        <p className="text-sm leading-relaxed">
-          Démo réussie. Aucune commande Shopify réelle n’a été créée.
-        </p>
+        <p className="text-sm leading-relaxed">{OUTSIDE_IFRAME_CART_MESSAGE}</p>
         <div className="mt-4 rounded-[var(--rm-radius)] border border-[var(--rm-border)] bg-[var(--rm-bg)] px-3">
           <SummaryRow label="Moto" value={cartSummary.bikeLabel} />
           <SummaryRow label="Design" value={cartSummary.designName} />
@@ -540,28 +577,15 @@ export function ConfiguratorShell() {
           />
           <SummaryRow
             label="Logos"
-            value={
-              completionSummary && completionSummary.logos.length > 0
-                ? completionSummary.logos
-                    .map(
-                      (logo) =>
-                        `${logo.name} — ${logo.prominenceLabel}`,
-                    )
-                    .join(" · ")
-                : String(cartSummary.selectedLogoCount)
-            }
+            value={String(cartSummary.selectedLogoCount)}
           />
           <SummaryRow
             label="Identifiant"
-            value={cartSummary.configurationId}
+            value={state.configurationId ?? cartSummary.configurationId}
           />
         </div>
         <p className="mt-3 text-sm text-[var(--rm-text-muted)]">
-          Un événement{" "}
-          <code className="rounded bg-[var(--rm-bg)] px-1">
-            JUSTPRINT_CONFIGURATION_COMPLETED
-          </code>{" "}
-          a été envoyé via postMessage.
+          Ton brouillon local est conservé.
         </p>
       </BottomSheet>
 
@@ -580,7 +604,7 @@ export function ConfiguratorShell() {
         }
       >
         <p className="mb-3 text-sm text-[var(--rm-text-muted)]">
-          Ces paramètres seront utilisés plus tard pour Shopify / JustPrint.
+          Ces paramètres sont transmis au parent Shopify via postMessage.
         </p>
         <dl className="space-y-2 font-mono text-sm">
           {(
@@ -599,7 +623,7 @@ export function ConfiguratorShell() {
           ))}
         </dl>
         <p className="mt-4 text-xs text-[var(--rm-text-muted)]">
-          Exemple panier futur : {formatBikeLabel(state.bike)} /{" "}
+          Résumé panier : {formatBikeLabel(state.bike)} /{" "}
           {getDesignName(state.selectedDesign)}
         </p>
       </BottomSheet>

@@ -293,7 +293,7 @@ export function PreviewStep({
                 onClick={onAddToCart}
                 disabled={addingToCart || saving}
               >
-                {addingToCart ? "Ajout…" : "Ajouter au panier — Démo"}
+                {addingToCart ? "Ajout au panier…" : "Ajouter au panier"}
               </button>
             </div>
           </div>

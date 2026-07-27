@@ -98,6 +98,33 @@ export interface JustPrintCompletionMessage {
   summary: ConfigurationCompletionSummary;
 }
 
+/** Commercial summary embedded in JUSTPRINT_ADD_TO_CART for the parent Shopify page. */
+export interface JustPrintAddToCartSummary {
+  bikeLabel: string;
+  designName: string;
+  riderName: string;
+  raceNumber: string;
+  previewMode: PreviewMode;
+  selectedColors: string[];
+  selectedLogoNames: string[];
+  selectedLogoCount: number;
+}
+
+/** Outgoing: ask the parent Shopify page to add the configured kit to cart. */
+export interface JustPrintAddToCartMessage {
+  type: "JUSTPRINT_ADD_TO_CART";
+  configurationId: string;
+  variantId: string | null;
+  source: "justprint-storefront";
+  summary: JustPrintAddToCartSummary;
+}
+
+/** Incoming: parent Shopify page reports a cart failure. */
+export interface JustPrintCartErrorMessage {
+  type: "JUSTPRINT_CART_ERROR";
+  message: string;
+}
+
 /** Future JustPrint generatePreview / completeConfiguration payloads. */
 export type JustPrintPreviewResult =
   | {

@@ -7,6 +7,7 @@ import {
 import type {
   ConfigurationCompletionSummary,
   ConfiguratorState,
+  JustPrintAddToCartSummary,
   ShopifyCartSummary,
 } from "@/types/configurator";
 
@@ -48,6 +49,7 @@ export function buildCompletionSummary(
 export function buildShopifyCartSummary(
   state: ConfiguratorState,
   configurationId: string,
+  variantId: string | null = null,
 ): ShopifyCartSummary {
   const sorted = sortLogosByProminence(state.selectedLogos);
 
@@ -62,8 +64,37 @@ export function buildShopifyCartSummary(
     selectedLogoCount: sorted.length,
     previewMode: getBikePreviewMode(state.bike),
     previewUrl: null,
-    variantId: null,
+    variantId,
   };
+}
+
+/** Summary payload for JUSTPRINT_ADD_TO_CART (parent Shopify cart bridge). */
+export function buildAddToCartSummary(
+  state: ConfiguratorState,
+): JustPrintAddToCartSummary {
+  const sorted = sortLogosByProminence(state.selectedLogos);
+
+  return {
+    bikeLabel: formatBikeLabel(state.bike),
+    designName: getDesignName(state.selectedDesign),
+    riderName: state.riderName,
+    raceNumber: state.raceNumber,
+    previewMode: getBikePreviewMode(state.bike),
+    selectedColors: state.palette.map((color) => color.hex),
+    selectedLogoNames: sorted.map((logo) => logo.name),
+    selectedLogoCount: sorted.length,
+  };
+}
+
+/** True when the configurator has enough data to request add-to-cart. */
+export function isConfigurationReadyForCart(state: ConfiguratorState): boolean {
+  return Boolean(
+    state.bike?.brand &&
+      state.bike.model &&
+      state.bike.year &&
+      state.selectedDesign &&
+      state.raceNumber.trim().length > 0,
+  );
 }
 
 export function formatLogoProminenceLine(logo: {
