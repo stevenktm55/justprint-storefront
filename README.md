@@ -50,22 +50,25 @@ Route principale :
 
 Jamais de fallback silencieux vers une autre boutique.
 
-## Mode mock (actuel)
+## Mode mock
 
 `NEXT_PUBLIC_JUSTPRINT_MODE=mock` (défaut) :
 
 - catalogue local RawMoto (motos 2D/3D, designs, logos)
-- configurations simulées en mémoire
+- configurations simulées en mémoire (publicId / editToken fictifs)
 - aperçus locaux inchangés
 - **aucun backend requis**
 
-## Mode connecté (futur)
+## Mode remote
 
-`NEXT_PUBLIC_JUSTPRINT_MODE=remote` + `NEXT_PUBLIC_JUSTPRINT_API_URL` :
+`NEXT_PUBLIC_JUSTPRINT_MODE=remote` + `NEXT_PUBLIC_JUSTPRINT_API_URL` (ex. `https://www.justprint.app`) :
 
-- bootstrap / create / update / preview / complete via HTTP
+- `POST /api/storefront/configurations` à la confirmation moto + design
+- `PATCH` automatique (debounce ~700 ms) avec `X-JustPrint-Edit-Token`
+- `POST …/finalize` avant `JUSTPRINT_ADD_TO_CART` (le message utilise le `publicId`)
+- catalogue : fallback mock tant que `/api/storefront/bootstrap` n’existe pas
 - les composants React n’appellent jamais `fetch` directement
-- brouillon `localStorage` conservé en cas d’indisponibilité
+- brouillon `localStorage` conservé en cas d’indisponibilité (`editToken` jamais exposé UI / panier / logs)
 
 ## Installation
 

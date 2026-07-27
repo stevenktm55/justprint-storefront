@@ -1,7 +1,8 @@
-import { JustPrintError } from "@/lib/justprint/errors";
+import { JustPrintError, justPrintErrorFromHttp } from "@/lib/justprint/errors";
 import { getJustPrintEnvironment } from "@/lib/justprint/environment";
 
 const DEFAULT_TIMEOUT_MS = 12_000;
+const EDIT_TOKEN_HEADER = "X-JustPrint-Edit-Token";
 
 export interface JustPrintFetchOptions {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
@@ -9,6 +10,8 @@ export interface JustPrintFetchOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   searchParams?: Record<string, string | undefined>;
+  /** Sent as X-JustPrint-Edit-Token — never logged. */
+  editToken?: string;
 }
 
 function buildUrl(path: string, searchParams?: Record<string, string | undefined>): string {
@@ -29,9 +32,23 @@ function buildUrl(path: string, searchParams?: Record<string, string | undefined
   return url.toString();
 }
 
+function readApiErrorMessage(parsed: unknown): {
+  message: string | null;
+  error: string | null;
+} {
+  if (!parsed || typeof parsed !== "object") {
+    return { message: null, error: null };
+  }
+  const record = parsed as Record<string, unknown>;
+  return {
+    message: typeof record.message === "string" ? record.message : null,
+    error: typeof record.error === "string" ? record.error : null,
+  };
+}
+
 /**
  * Browser-safe fetch wrapper for JustPrint public storefront endpoints.
- * No secret tokens — only public Next env vars.
+ * No secret tokens — only public Next env vars + per-configuration editToken.
  */
 export async function justPrintFetch<T>(
   path: string,
@@ -43,6 +60,7 @@ export async function justPrintFetch<T>(
     signal: externalSignal,
     timeoutMs = DEFAULT_TIMEOUT_MS,
     searchParams,
+    editToken,
   } = options;
 
   const controller = new AbortController();
@@ -67,54 +85,61 @@ export async function justPrintFetch<T>(
   }
 
   try {
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+    };
+    if (body !== undefined) {
+      headers["Content-Type"] = "application/json";
+    }
+    if (editToken) {
+      headers[EDIT_TOKEN_HEADER] = editToken;
+    }
+
     const response = await fetch(buildUrl(path, searchParams), {
       method,
       signal: controller.signal,
-      headers: {
-        Accept: "application/json",
-        ...(body !== undefined
-          ? { "Content-Type": "application/json" }
-          : {}),
-      },
+      headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
 
-    if (!response.ok) {
-      throw new JustPrintError({
-        code: "HTTP",
-        status: response.status,
-        message: `JustPrint HTTP ${response.status} for ${method} ${path}`,
-        userMessage:
-          response.status >= 500
-            ? "JustPrint est temporairement indisponible. Tes choix sont conservés."
-            : "JustPrint a refusé la requête. Tes choix sont conservés.",
-      });
-    }
-
     const contentType = response.headers.get("content-type") ?? "";
-    if (!contentType.includes("application/json")) {
-      // Allow empty 204-style bodies
-      if (response.status === 204) {
-        return undefined as T;
+    let parsed: unknown = undefined;
+
+    if (contentType.includes("application/json")) {
+      try {
+        const text = await response.text();
+        if (text) {
+          parsed = JSON.parse(text) as unknown;
+        }
+      } catch (cause) {
+        if (response.ok) {
+          throw new JustPrintError({
+            code: "INVALID_JSON",
+            status: response.status,
+            message: `Invalid JSON from JustPrint for ${method} ${path}`,
+            userMessage:
+              "Réponse JustPrint invalide. Tes choix sont conservés localement.",
+            cause,
+          });
+        }
       }
+    } else if (response.ok && response.status !== 204) {
+      // Non-JSON success with body is unexpected for this API.
     }
 
-    let parsed: unknown;
-    try {
-      const text = await response.text();
-      if (!text) {
-        return undefined as T;
-      }
-      parsed = JSON.parse(text) as unknown;
-    } catch (cause) {
-      throw new JustPrintError({
-        code: "INVALID_JSON",
+    if (!response.ok) {
+      const { message, error } = readApiErrorMessage(parsed);
+      throw justPrintErrorFromHttp({
         status: response.status,
-        message: `Invalid JSON from JustPrint for ${method} ${path}`,
-        userMessage:
-          "Réponse JustPrint invalide. Tes choix sont conservés localement.",
-        cause,
+        path,
+        method,
+        apiMessage: message,
+        apiError: error,
       });
+    }
+
+    if (parsed === undefined && response.status === 204) {
+      return undefined as T;
     }
 
     return parsed as T;

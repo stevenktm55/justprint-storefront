@@ -12,21 +12,25 @@ import {
 } from "react";
 import { useConfigurator } from "@/context/ConfiguratorContext";
 import { useStorefrontTenant } from "@/context/StorefrontTenantContext";
-import { getBikePreviewMode } from "@/lib/bike-preview";
 import {
+  buildCreateConfigurationBody,
+  buildPatchConfigurationBody,
   createConfiguration,
+  finalizeConfiguration,
   getStorefrontBootstrap,
   isJustPrintError,
   updateConfiguration,
 } from "@/lib/justprint-client";
+import { hasValidServerConfiguration, saveDraft } from "@/lib/storage";
 import type { ConfiguratorState } from "@/types/configurator";
 import type {
+  FinalizeConfigurationResponse,
   StorefrontBootstrap,
   StorefrontDesign,
   StorefrontLogo,
   StorefrontLogoCategory,
   StorefrontBike,
-  SyncStatus,
+  SynchronizationStatus,
 } from "@/types/justprint";
 
 export type BootstrapStatus = "idle" | "loading" | "ready" | "error";
@@ -41,51 +45,92 @@ interface StorefrontContextValue {
   logoCategories: StorefrontLogoCategory[];
   logos: StorefrontLogo[];
   shopId: string;
-  syncStatus: SyncStatus;
+  syncStatus: SynchronizationStatus;
   syncError: string | null;
   clearSyncError: () => void;
   retrySync: () => void;
   ensureConfiguration: (
     state: ConfiguratorState,
   ) => Promise<string | null>;
+  /** Flush pending save, then finalize. Returns publicId on success. */
+  finalizeForCart: (
+    state: ConfiguratorState,
+  ) => Promise<FinalizeConfigurationResponse>;
 }
 
 const StorefrontContext = createContext<StorefrontContextValue | null>(null);
 
-const SYNC_DEBOUNCE_MS = 650;
+const SYNC_DEBOUNCE_MS = 700;
 
-function personalizationFromState(state: ConfiguratorState) {
-  return {
+function buildSyncSignature(state: ConfiguratorState): string {
+  return JSON.stringify({
+    configurationId: state.configurationId,
+    bikeId: state.bike?.id ?? null,
+    designId: state.selectedDesign,
     riderName: state.riderName,
     raceNumber: state.raceNumber,
     plateColor: state.plateColor,
     numberColor: state.numberColor,
     nameColor: state.nameColor,
     palette: state.palette,
-  };
-}
-
-function logosFromState(state: ConfiguratorState) {
-  return state.selectedLogos.map((logo) => ({
-    id: logo.id,
-    name: logo.name,
-    prominenceLevel: logo.prominenceLevel,
-    addedAt: logo.addedAt,
-  }));
+    logos: state.selectedLogos.map((logo) => ({
+      id: logo.id,
+      name: logo.name,
+      prominenceLevel: logo.prominenceLevel,
+    })),
+  });
 }
 
 export function StorefrontProvider({ children }: { children: ReactNode }) {
   const { state, dispatch } = useConfigurator();
-  const { shopId, features } = useStorefrontTenant();
+  const { shopId, features, tenant } = useStorefrontTenant();
   const [bootstrap, setBootstrap] = useState<StorefrontBootstrap | null>(null);
   const [bootstrapStatus, setBootstrapStatus] =
     useState<BootstrapStatus>("idle");
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [bootstrapNonce, setBootstrapNonce] = useState(0);
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
+  const [syncStatus, setSyncStatus] = useState<SynchronizationStatus>("idle");
   const [syncError, setSyncError] = useState<string | null>(null);
+
   const creatingRef = useRef(false);
+  const createPromiseRef = useRef<Promise<string | null> | null>(null);
+  const createAttemptedKeyRef = useRef<string | null>(null);
   const lastSyncedSignatureRef = useRef<string | null>(null);
+  const saveInFlightRef = useRef(false);
+  const saveQueuedRef = useRef(false);
+  const latestStateRef = useRef(state);
+  const flushResolversRef = useRef<Array<() => void>>([]);
+  const serverCredentialsRef = useRef<{
+    configurationId: string;
+    publicId: string;
+    editToken: string;
+  } | null>(null);
+
+  useEffect(() => {
+    latestStateRef.current = state;
+    if (
+      state.configurationId &&
+      state.publicId &&
+      state.editToken &&
+      state.configurationStatus !== "finalized"
+    ) {
+      serverCredentialsRef.current = {
+        configurationId: state.configurationId,
+        publicId: state.publicId,
+        editToken: state.editToken,
+      };
+    } else if (!state.configurationId) {
+      serverCredentialsRef.current = null;
+    }
+  }, [state]);
+
+  const snapshotContext = useMemo(
+    () => ({
+      shopId,
+      locale: tenant.locale?.startsWith("fr") ? "fr" : "en",
+    }),
+    [shopId, tenant.locale],
+  );
 
   const reloadBootstrap = useCallback(() => {
     setBootstrapNonce((value) => value + 1);
@@ -120,14 +165,121 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
     };
   }, [bootstrapNonce, shopId]);
 
+  const setSync = useCallback(
+    (status: SynchronizationStatus) => {
+      setSyncStatus(status);
+      dispatch({ type: "SET_SYNCHRONIZATION_STATUS", payload: status });
+    },
+    [dispatch],
+  );
+
+  const performSave = useCallback(
+    async (draftState: ConfiguratorState): Promise<boolean> => {
+      if (
+        !draftState.configurationId ||
+        !draftState.editToken ||
+        !draftState.bike ||
+        !draftState.selectedDesign
+      ) {
+        return true;
+      }
+
+      if (draftState.configurationStatus === "finalized") {
+        return true;
+      }
+
+      const signature = buildSyncSignature(draftState);
+      setSync("saving");
+      setSyncError(null);
+
+      try {
+        const result = await updateConfiguration(
+          draftState.configurationId,
+          draftState.editToken,
+          buildPatchConfigurationBody(draftState, snapshotContext),
+        );
+        lastSyncedSignatureRef.current = signature;
+        const savedAt = result.updatedAt;
+        dispatch({ type: "SET_LAST_SAVED_AT", payload: savedAt });
+        dispatch({
+          type: "SET_CONFIGURATION_STATUS",
+          payload: result.status,
+        });
+        if (result.publicId) {
+          dispatch({ type: "SET_PUBLIC_ID", payload: result.publicId });
+        }
+        setSync("saved");
+        saveDraft({
+          ...draftState,
+          publicId: result.publicId || draftState.publicId,
+          configurationStatus: result.status,
+          lastSavedAt: savedAt,
+          synchronizationStatus: "saved",
+        });
+        return true;
+      } catch (error) {
+        const message = isJustPrintError(error)
+          ? error.userMessage
+          : "Erreur de sauvegarde JustPrint. Tes choix locaux sont conservés.";
+        setSyncError(message);
+        setSync("error");
+        return false;
+      }
+    },
+    [dispatch, setSync, snapshotContext],
+  );
+
+  const runSaveLoop = useCallback(async () => {
+    if (saveInFlightRef.current) {
+      saveQueuedRef.current = true;
+      return;
+    }
+
+    saveInFlightRef.current = true;
+    try {
+      do {
+        saveQueuedRef.current = false;
+        await performSave(latestStateRef.current);
+      } while (saveQueuedRef.current);
+    } finally {
+      saveInFlightRef.current = false;
+      const resolvers = flushResolversRef.current.splice(0);
+      for (const resolve of resolvers) {
+        resolve();
+      }
+    }
+  }, [performSave]);
+
+  const waitForSaveIdle = useCallback(async () => {
+    if (!saveInFlightRef.current && !saveQueuedRef.current) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      flushResolversRef.current.push(resolve);
+    });
+  }, []);
+
   const ensureConfiguration = useCallback(
     async (draftState: ConfiguratorState): Promise<string | null> => {
-      if (draftState.configurationId) {
+      if (hasValidServerConfiguration(draftState)) {
+        serverCredentialsRef.current = {
+          configurationId: draftState.configurationId!,
+          publicId: draftState.publicId!,
+          editToken: draftState.editToken!,
+        };
         return draftState.configurationId;
+      }
+
+      if (serverCredentialsRef.current) {
+        return serverCredentialsRef.current.configurationId;
       }
 
       if (!draftState.bike || !draftState.selectedDesign) {
         return null;
+      }
+
+      if (createPromiseRef.current) {
+        return createPromiseRef.current;
       }
 
       if (creatingRef.current) {
@@ -135,98 +287,200 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
       }
 
       creatingRef.current = true;
-      try {
-        const draft = await createConfiguration({
-          shopId,
-          bikeId: draftState.bike.id,
-          designId: draftState.selectedDesign,
-          previewMode: getBikePreviewMode(draftState.bike),
-          personalization: personalizationFromState(draftState),
-          logos: logosFromState(draftState),
-        });
-        dispatch({ type: "SET_CONFIGURATION_ID", payload: draft.id });
-        lastSyncedSignatureRef.current = null;
-        return draft.id;
-      } catch (error) {
-        const message = isJustPrintError(error)
-          ? error.userMessage
-          : "Impossible de créer la configuration JustPrint.";
-        setSyncError(message);
-        setSyncStatus("error");
-        return null;
-      } finally {
-        creatingRef.current = false;
-      }
+      setSync("creating");
+      setSyncError(null);
+
+      const promise = (async (): Promise<string | null> => {
+        try {
+          const created = await createConfiguration(
+            buildCreateConfigurationBody(draftState, snapshotContext),
+          );
+
+          serverCredentialsRef.current = {
+            configurationId: created.configurationId,
+            publicId: created.publicId,
+            editToken: created.editToken,
+          };
+
+          dispatch({
+            type: "SET_SERVER_CONFIGURATION",
+            payload: {
+              configurationId: created.configurationId,
+              publicId: created.publicId,
+              editToken: created.editToken,
+              status: created.status,
+              lastSavedAt: created.createdAt,
+            },
+          });
+
+          lastSyncedSignatureRef.current = buildSyncSignature({
+            ...draftState,
+            configurationId: created.configurationId,
+            publicId: created.publicId,
+            editToken: created.editToken,
+          });
+
+          saveDraft({
+            ...draftState,
+            configurationId: created.configurationId,
+            publicId: created.publicId,
+            editToken: created.editToken,
+            configurationStatus: created.status,
+            lastSavedAt: created.createdAt,
+            synchronizationStatus: "saved",
+          });
+
+          setSync("saved");
+          return created.configurationId;
+        } catch (error) {
+          const message = isJustPrintError(error)
+            ? error.userMessage
+            : "Impossible de créer la configuration JustPrint.";
+          setSyncError(message);
+          setSync("error");
+          return null;
+        } finally {
+          creatingRef.current = false;
+          createPromiseRef.current = null;
+        }
+      })();
+
+      createPromiseRef.current = promise;
+      return promise;
     },
-    [dispatch, shopId],
+    [dispatch, setSync, snapshotContext],
   );
 
+  // Create draft once bike + design are known (including restored drafts).
   useEffect(() => {
     if (bootstrapStatus !== "ready") return;
-    if (!state.configurationId) return;
     if (!state.bike || !state.selectedDesign) return;
+    if (hasValidServerConfiguration(state)) return;
+    if (state.configurationStatus === "finalized") return;
+    if (creatingRef.current || createPromiseRef.current) return;
 
-    const signature = JSON.stringify({
-      configurationId: state.configurationId,
-      bikeId: state.bike.id,
-      designId: state.selectedDesign,
-      personalization: personalizationFromState(state),
-      logos: logosFromState(state),
-      previewMode: getBikePreviewMode(state.bike),
-    });
+    const attemptKey = `${state.bike.id}:${state.selectedDesign}`;
+    if (createAttemptedKeyRef.current === attemptKey) return;
+    createAttemptedKeyRef.current = attemptKey;
 
+    void ensureConfiguration(state);
+  }, [
+    bootstrapStatus,
+    ensureConfiguration,
+    state,
+  ]);
+
+  // Debounced auto-save after draft exists.
+  useEffect(() => {
+    if (bootstrapStatus !== "ready") return;
+    if (!hasValidServerConfiguration(state)) return;
+    if (state.configurationStatus === "finalized") return;
+
+    const signature = buildSyncSignature(state);
     if (signature === lastSyncedSignatureRef.current) {
       return;
     }
 
-    let cancelled = false;
-    setSyncStatus("saving");
-    setSyncError(null);
-
     const timer = window.setTimeout(() => {
-      void (async () => {
-        try {
-          await updateConfiguration({
-            configurationId: state.configurationId!,
-            bikeId: state.bike!.id,
-            designId: state.selectedDesign!,
-            previewMode: getBikePreviewMode(state.bike),
-            personalization: personalizationFromState(state),
-            logos: logosFromState(state),
-            status: "draft",
-          });
-          if (cancelled) return;
-          lastSyncedSignatureRef.current = signature;
-          setSyncStatus("saved");
-        } catch (error) {
-          if (cancelled) return;
-          const message = isJustPrintError(error)
-            ? error.userMessage
-            : "Erreur de sauvegarde JustPrint. Tes choix locaux sont conservés.";
-          setSyncError(message);
-          setSyncStatus("error");
-        }
-      })();
+      void runSaveLoop();
     }, SYNC_DEBOUNCE_MS);
 
     return () => {
-      cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [bootstrapStatus, state]);
+  }, [bootstrapStatus, runSaveLoop, state]);
 
   const clearSyncError = useCallback(() => {
     setSyncError(null);
     if (syncStatus === "error") {
-      setSyncStatus("idle");
+      setSync("idle");
     }
-  }, [syncStatus]);
+  }, [setSync, syncStatus]);
 
   const retrySync = useCallback(() => {
     lastSyncedSignatureRef.current = null;
+    createAttemptedKeyRef.current = null;
     setSyncError(null);
-    setSyncStatus("idle");
-  }, []);
+    setSync("idle");
+
+    const current = latestStateRef.current;
+    if (!hasValidServerConfiguration(current) && current.bike && current.selectedDesign) {
+      void ensureConfiguration(current);
+      return;
+    }
+    void runSaveLoop();
+  }, [ensureConfiguration, runSaveLoop, setSync]);
+
+  const finalizeForCart = useCallback(
+    async (
+      draftState: ConfiguratorState,
+    ): Promise<FinalizeConfigurationResponse> => {
+      if (!hasValidServerConfiguration(draftState) && !serverCredentialsRef.current) {
+        const createdId = await ensureConfiguration(draftState);
+        if (!createdId || !serverCredentialsRef.current) {
+          throw new Error(
+            "Impossible de créer la configuration avant finalisation.",
+          );
+        }
+      }
+
+      // Wait for any in-flight debounce / save, then force a last full patch.
+      await waitForSaveIdle();
+
+      const credentials = serverCredentialsRef.current;
+      const latest = latestStateRef.current;
+      const configurationId =
+        credentials?.configurationId ?? latest.configurationId;
+      const editToken = credentials?.editToken ?? latest.editToken;
+
+      if (
+        !configurationId ||
+        !editToken ||
+        !latest.bike ||
+        !latest.selectedDesign
+      ) {
+        throw new Error("Configuration incomplète pour la finalisation.");
+      }
+
+      setSync("saving");
+      setSyncError(null);
+
+      await updateConfiguration(
+        configurationId,
+        editToken,
+        buildPatchConfigurationBody(latest, snapshotContext),
+      );
+
+      setSync("finalizing");
+
+      const finalized = await finalizeConfiguration(
+        configurationId,
+        editToken,
+      );
+
+      dispatch({
+        type: "SET_SERVER_CONFIGURATION",
+        payload: {
+          configurationId: finalized.configurationId,
+          publicId: finalized.publicId,
+          editToken,
+          status: "finalized",
+          lastSavedAt: new Date().toISOString(),
+        },
+      });
+      setSync("finalized");
+      serverCredentialsRef.current = null;
+
+      return finalized;
+    },
+    [
+      dispatch,
+      ensureConfiguration,
+      setSync,
+      snapshotContext,
+      waitForSaveIdle,
+    ],
+  );
 
   const value = useMemo<StorefrontContextValue>(
     () => ({
@@ -246,6 +500,7 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
       clearSyncError,
       retrySync,
       ensureConfiguration,
+      finalizeForCart,
     }),
     [
       bootstrap,
@@ -259,6 +514,7 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
       clearSyncError,
       retrySync,
       ensureConfiguration,
+      finalizeForCart,
     ],
   );
 

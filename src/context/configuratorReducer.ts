@@ -10,6 +10,10 @@ import {
   type ProductionCheck,
   type SelectedLogo,
 } from "@/types/configurator";
+import type {
+  ConfigurationStatus,
+  SynchronizationStatus,
+} from "@/types/justprint";
 import {
   clampProminenceLevel,
 } from "@/lib/logo-prominence";
@@ -41,7 +45,22 @@ export type ConfiguratorAction =
       type: "UPDATE_CHECK_STATUS";
       payload: { id: string; status: CheckStatus };
     }
+  | {
+      type: "SET_SERVER_CONFIGURATION";
+      payload: {
+        configurationId: string;
+        publicId: string;
+        editToken: string;
+        status: ConfigurationStatus;
+        lastSavedAt?: string | null;
+      };
+    }
   | { type: "SET_CONFIGURATION_ID"; payload: string }
+  | { type: "SET_PUBLIC_ID"; payload: string }
+  | { type: "SET_CONFIGURATION_STATUS"; payload: ConfigurationStatus }
+  | { type: "SET_LAST_SAVED_AT"; payload: string | null }
+  | { type: "SET_SYNCHRONIZATION_STATUS"; payload: SynchronizationStatus }
+  | { type: "CLEAR_SERVER_CONFIGURATION" }
   | { type: "APPLY_DESIGN_PALETTE"; payload: PaletteColor[] }
   | { type: "SET_RETURN_TO_FINAL_PREVIEW"; payload: boolean }
   | { type: "START_DESIGN_CHANGE_FROM_PREVIEW" }
@@ -220,6 +239,41 @@ export function configuratorReducer(
 
     case "SET_CONFIGURATION_ID":
       return { ...state, configurationId: action.payload };
+
+    case "SET_SERVER_CONFIGURATION":
+      return {
+        ...state,
+        configurationId: action.payload.configurationId,
+        publicId: action.payload.publicId,
+        editToken: action.payload.editToken,
+        configurationStatus: action.payload.status,
+        lastSavedAt: action.payload.lastSavedAt ?? state.lastSavedAt,
+        synchronizationStatus:
+          action.payload.status === "finalized" ? "finalized" : state.synchronizationStatus,
+      };
+
+    case "SET_PUBLIC_ID":
+      return { ...state, publicId: action.payload };
+
+    case "SET_CONFIGURATION_STATUS":
+      return { ...state, configurationStatus: action.payload };
+
+    case "SET_LAST_SAVED_AT":
+      return { ...state, lastSavedAt: action.payload };
+
+    case "SET_SYNCHRONIZATION_STATUS":
+      return { ...state, synchronizationStatus: action.payload };
+
+    case "CLEAR_SERVER_CONFIGURATION":
+      return {
+        ...state,
+        configurationId: null,
+        publicId: null,
+        editToken: null,
+        configurationStatus: null,
+        lastSavedAt: null,
+        synchronizationStatus: "idle",
+      };
 
     default:
       return state;

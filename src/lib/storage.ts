@@ -10,6 +10,10 @@ import {
   DEFAULT_PALETTE,
   DEFAULT_PRODUCTION_CHECKS,
 } from "@/types/configurator";
+import type {
+  ConfigurationStatus,
+  SynchronizationStatus,
+} from "@/types/justprint";
 import { resolveBikeSelection } from "@/lib/bike-preview";
 
 export const DRAFT_STORAGE_KEY = "rawmoto-configurator-draft";
@@ -125,6 +129,55 @@ function normalizeBike(rawBike: unknown) {
   });
 }
 
+function normalizeConfigurationStatus(
+  value: unknown,
+): ConfigurationStatus | null {
+  if (
+    value === "draft" ||
+    value === "preview_ready" ||
+    value === "completed" ||
+    value === "finalized"
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function normalizeSynchronizationStatus(
+  value: unknown,
+): SynchronizationStatus {
+  if (
+    value === "idle" ||
+    value === "creating" ||
+    value === "saving" ||
+    value === "saved" ||
+    value === "finalizing" ||
+    value === "finalized" ||
+    value === "error"
+  ) {
+    return value;
+  }
+  return "idle";
+}
+
+/**
+ * True when the draft already has a usable JustPrint server triple.
+ * Finalized configs must NOT be reused for a new kit.
+ */
+export function hasValidServerConfiguration(
+  state: Pick<
+    ConfiguratorState,
+    "configurationId" | "publicId" | "editToken" | "configurationStatus"
+  >,
+): boolean {
+  return Boolean(
+    state.configurationId &&
+      state.publicId &&
+      state.editToken &&
+      state.configurationStatus !== "finalized",
+  );
+}
+
 export function migrateDraft(raw: unknown): ConfiguratorState | null {
   if (!isRecord(raw)) return null;
 
@@ -132,6 +185,21 @@ export function migrateDraft(raw: unknown): ConfiguratorState | null {
   const normalizedBike = normalizeBike(raw.bike);
 
   const selectedLogos = normalizeSelectedLogos(raw.selectedLogos);
+
+  const configurationStatus = normalizeConfigurationStatus(
+    raw.configurationStatus,
+  );
+
+  // Legacy drafts only had configurationId (mock id) — keep local progress,
+  // but clear incomplete server triples so remote create can run later.
+  const configurationId =
+    typeof raw.configurationId === "string" ? raw.configurationId : null;
+  const publicId = typeof raw.publicId === "string" ? raw.publicId : null;
+  const editToken = typeof raw.editToken === "string" ? raw.editToken : null;
+
+  const hasFullServerTriple = Boolean(
+    configurationId && publicId && editToken,
+  );
 
   const migrated: ConfiguratorState = {
     ...base,
@@ -160,11 +228,31 @@ export function migrateDraft(raw: unknown): ConfiguratorState | null {
         ? raw.previewView
         : "left",
     productionChecks: normalizeProductionChecks(raw.productionChecks),
-    configurationId:
-      typeof raw.configurationId === "string" ? raw.configurationId : null,
+    configurationId: hasFullServerTriple ? configurationId : null,
+    publicId: hasFullServerTriple ? publicId : null,
+    editToken: hasFullServerTriple ? editToken : null,
+    configurationStatus: hasFullServerTriple
+      ? (configurationStatus ?? "draft")
+      : null,
+    lastSavedAt:
+      typeof raw.lastSavedAt === "string" ? raw.lastSavedAt : null,
+    synchronizationStatus:
+      configurationStatus === "finalized"
+        ? "finalized"
+        : normalizeSynchronizationStatus(raw.synchronizationStatus),
     draftRestored: true,
     returnToFinalPreview: false,
   };
+
+  // Finalized configs must not seed a new kit — drop server link, keep choices.
+  if (migrated.configurationStatus === "finalized") {
+    migrated.configurationId = null;
+    migrated.publicId = null;
+    migrated.editToken = null;
+    migrated.configurationStatus = null;
+    migrated.lastSavedAt = null;
+    migrated.synchronizationStatus = "idle";
+  }
 
   return migrated;
 }
@@ -177,6 +265,7 @@ export function hasDraftProgress(state: Pick<
   | "riderName"
   | "selectedLogos"
   | "configurationId"
+  | "publicId"
 >): boolean {
   return (
     state.currentStep > 1 ||
@@ -184,10 +273,12 @@ export function hasDraftProgress(state: Pick<
     Boolean(state.selectedDesign) ||
     Boolean(state.riderName) ||
     state.selectedLogos.length > 0 ||
-    Boolean(state.configurationId)
+    Boolean(state.configurationId) ||
+    Boolean(state.publicId)
   );
 }
 
+/** Persist draft — editToken is stored for resume, never logged by callers. */
 export function saveDraft(state: ConfiguratorState): void {
   if (!isBrowser()) return;
   if (!hasDraftProgress(state)) {
@@ -195,15 +286,20 @@ export function saveDraft(state: ConfiguratorState): void {
     return;
   }
 
-  const { draftRestored: _draftRestored, returnToFinalPreview: _returnFlag, ...persisted } =
-    state;
+  const {
+    draftRestored: _draftRestored,
+    returnToFinalPreview: _returnFlag,
+    synchronizationStatus: _sync,
+    ...persisted
+  } = state;
   void _draftRestored;
   void _returnFlag;
+  void _sync;
 
   try {
     window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(persisted));
   } catch {
-    // Ignore quota / private mode errors in demo mode.
+    // Ignore quota / private mode errors.
   }
 }
 
@@ -231,18 +327,52 @@ export function clearDraft(): void {
   window.localStorage.removeItem(DRAFT_STORAGE_KEY);
 }
 
+/**
+ * After a successful add-to-cart / finalize, clear the draft so the next kit
+ * cannot reuse the finalized configuration.
+ */
+export function clearDraftAfterFinalize(): void {
+  clearDraft();
+}
+
 export function saveCompletedConfiguration(payload: unknown): void {
   if (!isBrowser()) return;
 
   try {
+    // Never persist editToken in completed payloads.
+    const safePayload = sanitizeCompletedPayload(payload);
     window.localStorage.setItem(
       COMPLETED_STORAGE_KEY,
       JSON.stringify({
         savedAt: new Date().toISOString(),
-        payload,
+        payload: safePayload,
       }),
     );
   } catch {
-    // Ignore storage errors in demo mode.
+    // Ignore storage errors.
   }
+}
+
+function sanitizeCompletedPayload(payload: unknown): unknown {
+  if (!isRecord(payload)) return payload;
+  const clone: Record<string, unknown> = { ...payload };
+  delete clone.editToken;
+  if (isRecord(clone.message)) {
+    const message = { ...clone.message };
+    delete message.editToken;
+    clone.message = message;
+  }
+  if (isRecord(clone.shopifySummary)) {
+    const summary = { ...clone.shopifySummary };
+    delete summary.editToken;
+    clone.shopifySummary = summary;
+  }
+  return clone;
+}
+
+/** Public display id — prefer publicId, never editToken. */
+export function getDisplayConfigurationId(
+  state: Pick<ConfiguratorState, "publicId" | "configurationId">,
+): string | null {
+  return state.publicId ?? state.configurationId;
 }

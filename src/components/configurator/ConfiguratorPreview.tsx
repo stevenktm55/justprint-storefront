@@ -65,6 +65,11 @@ function buildStateFromProps(
     previewView: props.previewView ?? "left",
     productionChecks: [],
     configurationId: null,
+    publicId: null,
+    editToken: null,
+    configurationStatus: null,
+    lastSavedAt: null,
+    synchronizationStatus: "idle",
     draftRestored: false,
     returnToFinalPreview: false,
   };

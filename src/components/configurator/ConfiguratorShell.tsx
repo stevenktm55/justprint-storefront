@@ -34,10 +34,14 @@ import {
   getDesignName,
   isConfigurationReadyForCart,
 } from "@/lib/cart-summary";
-import { generateConfigurationId } from "@/lib/configuration-id";
 import { addGarageBike, loadGarageBikes } from "@/lib/garage";
 import { justPrintClient, isJustPrintError } from "@/lib/justprint-client";
-import { saveDraft, saveCompletedConfiguration } from "@/lib/storage";
+import {
+  clearDraftAfterFinalize,
+  getDisplayConfigurationId,
+  saveCompletedConfiguration,
+  saveDraft,
+} from "@/lib/storage";
 import {
   canAcceptParentMessage,
   isEmbeddedInIframe,
@@ -50,6 +54,7 @@ import type {
   JustPrintAddToCartMessage,
   ShopifyCartSummary,
 } from "@/types/configurator";
+import type { SynchronizationStatus } from "@/types/justprint";
 
 const PRIMARY_LABELS: Record<ConfiguratorStep, string> = {
   1: "Voir les designs",
@@ -67,15 +72,21 @@ function SyncStatusBadge({
   status,
   onRetry,
 }: {
-  status: "idle" | "saving" | "saved" | "error";
+  status: SynchronizationStatus;
   onRetry: () => void;
 }) {
-  if (status === "idle") return null;
+  if (status === "idle" || status === "finalized") return null;
 
-  if (status === "saving") {
+  if (status === "creating" || status === "saving" || status === "finalizing") {
+    const label =
+      status === "creating"
+        ? "Création…"
+        : status === "finalizing"
+          ? "Finalisation…"
+          : "Sauvegarde…";
     return (
       <p className="text-[11px] font-medium text-[var(--rm-text-muted)]">
-        Sauvegarde…
+        {label}
       </p>
     );
   }
@@ -118,6 +129,8 @@ export function ConfiguratorShell() {
     clearSyncError,
     retrySync,
     ensureConfiguration,
+    finalizeForCart,
+    shopId,
   } = useStorefront();
   const { tenant, allowedParentOrigins } = useStorefrontTenant();
   const searchParams = useSearchParams();
@@ -131,7 +144,10 @@ export function ConfiguratorShell() {
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [cartSummary, setCartSummary] = useState<ShopifyCartSummary>(() =>
-    buildShopifyCartSummary(state, state.configurationId ?? "—"),
+    buildShopifyCartSummary(
+      state,
+      getDisplayConfigurationId(state) ?? "—",
+    ),
   );
 
   const shopifyParams = useMemo(
@@ -199,26 +215,35 @@ export function ConfiguratorShell() {
     setAddingToCart(true);
 
     try {
-      const configurationId =
-        state.configurationId ??
-        (await ensureConfiguration(state)) ??
-        generateConfigurationId();
+      const finalized = await finalizeForCart(state);
+      const publicId = finalized.publicId;
 
-      if (!state.configurationId) {
-        dispatch({ type: "SET_CONFIGURATION_ID", payload: configurationId });
+      if (!publicId) {
+        throw new Error("JustPrint n’a pas renvoyé d’identifiant public.");
       }
 
       const variantId = shopifyParams.variant;
-      const summary = buildAddToCartSummary({ ...state, configurationId });
+      const summary = buildAddToCartSummary({
+        ...state,
+        publicId,
+        configurationId: finalized.configurationId,
+        configurationStatus: "finalized",
+      });
       const shopifySummary = buildShopifyCartSummary(
-        { ...state, configurationId },
-        configurationId,
+        {
+          ...state,
+          publicId,
+          configurationId: finalized.configurationId,
+          configurationStatus: "finalized",
+        },
+        publicId,
         variantId,
       );
 
+      // postMessage: configurationId carries the publicId (never editToken / UUID).
       const message: JustPrintAddToCartMessage = {
         type: "JUSTPRINT_ADD_TO_CART",
-        configurationId,
+        configurationId: publicId,
         variantId,
         source: "justprint-storefront",
         summary,
@@ -227,23 +252,25 @@ export function ConfiguratorShell() {
       saveCompletedConfiguration({
         message,
         shopifySummary,
+        publicId,
       });
-      saveDraft({ ...state, configurationId });
+      clearDraftAfterFinalize();
       setCartSummary(shopifySummary);
 
       notifyParentAddToCart(message, allowedParentOrigins);
     } catch (error) {
       const message = isJustPrintError(error)
         ? error.userMessage
-        : "Impossible de préparer l’ajout au panier. Tes choix sont conservés.";
+        : error instanceof Error && error.message
+          ? error.message
+          : "Impossible de finaliser la configuration. Tes choix sont conservés.";
       setActionError(message);
       setAddingToCart(false);
     }
   }, [
     addingToCart,
     allowedParentOrigins,
-    dispatch,
-    ensureConfiguration,
+    finalizeForCart,
     shopifyParams.variant,
     state,
   ]);
@@ -288,10 +315,13 @@ export function ConfiguratorShell() {
         }
 
         await justPrintClient.runProductionChecks(state);
-        await justPrintClient.saveDraft({
-          ...state,
-          configurationId: configurationId ?? state.configurationId,
-        });
+        await justPrintClient.saveDraft(
+          {
+            ...state,
+            configurationId: configurationId ?? state.configurationId,
+          },
+          { shopId, locale: "fr" },
+        );
 
         dispatch({
           type: "SET_PRODUCTION_CHECKS",
@@ -321,6 +351,7 @@ export function ConfiguratorShell() {
     ensureConfiguration,
     goNext,
     handleAddToCart,
+    shopId,
     state,
   ]);
 
@@ -339,18 +370,21 @@ export function ConfiguratorShell() {
 
   const handleQuit = useCallback(() => {
     saveDraft(state);
-    void justPrintClient.saveDraft(state).catch(() => {
-      // Local draft is already saved — remote failure is non-blocking.
-    });
+    void justPrintClient
+      .saveDraft(state, { shopId, locale: "fr" })
+      .catch(() => {
+        // Local draft is already saved — remote failure is non-blocking.
+      });
     setQuitOpen(true);
-  }, [state]);
+  }, [shopId, state]);
 
   const handleSaveDraft = useCallback(async () => {
     setSaving(true);
     setActionError(null);
     try {
+      await ensureConfiguration(state);
       saveDraft(state);
-      await justPrintClient.saveDraft(state);
+      await justPrintClient.saveDraft(state, { shopId, locale: "fr" });
       setSaveOpen(true);
     } catch (error) {
       const message = isJustPrintError(error)
@@ -361,7 +395,7 @@ export function ConfiguratorShell() {
     } finally {
       setSaving(false);
     }
-  }, [state]);
+  }, [ensureConfiguration, shopId, state]);
 
   const primaryLabel =
     state.currentStep === 2 && state.returnToFinalPreview
@@ -581,7 +615,10 @@ export function ConfiguratorShell() {
           />
           <SummaryRow
             label="Identifiant"
-            value={state.configurationId ?? cartSummary.configurationId}
+            value={
+              getDisplayConfigurationId(state) ??
+              cartSummary.configurationId
+            }
           />
         </div>
         <p className="mt-3 text-sm text-[var(--rm-text-muted)]">

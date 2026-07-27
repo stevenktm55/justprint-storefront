@@ -1,10 +1,12 @@
 import type {
+  ConfigurationStatus,
   StorefrontBike,
   StorefrontBike2D,
   StorefrontBike3D,
   StorefrontDesign,
   StorefrontLogo,
   StorefrontLogoCategoryId,
+  SynchronizationStatus,
 } from "@/types/justprint";
 
 export type ConfiguratorStep = 1 | 2 | 3 | 4 | 5;
@@ -159,7 +161,18 @@ export interface ConfiguratorState {
   selectedLogos: SelectedLogo[];
   previewView: PreviewView;
   productionChecks: ProductionCheck[];
+  /** UUID interne JustPrint (jamais exposé au panier Shopify). */
   configurationId: string | null;
+  /** Identifiant public JP-RM-… — utilisé dans le panier / postMessage. */
+  publicId: string | null;
+  /**
+   * Jeton d’édition JustPrint.
+   * Ne jamais afficher, logger, ni inclure dans postMessage / panier.
+   */
+  editToken: string | null;
+  configurationStatus: ConfigurationStatus | null;
+  lastSavedAt: string | null;
+  synchronizationStatus: SynchronizationStatus;
   draftRestored: boolean;
   /** When true, design selection returns to the final preview without resetting other choices. */
   returnToFinalPreview: boolean;
@@ -209,6 +222,11 @@ export function createInitialState(): ConfiguratorState {
     previewView: "left",
     productionChecks: DEFAULT_PRODUCTION_CHECKS.map((check) => ({ ...check })),
     configurationId: null,
+    publicId: null,
+    editToken: null,
+    configurationStatus: null,
+    lastSavedAt: null,
+    synchronizationStatus: "idle",
     draftRestored: false,
     returnToFinalPreview: false,
   };

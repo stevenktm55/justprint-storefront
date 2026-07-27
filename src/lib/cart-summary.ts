@@ -93,6 +93,7 @@ export function isConfigurationReadyForCart(state: ConfiguratorState): boolean {
       state.bike.model &&
       state.bike.year &&
       state.selectedDesign &&
+      state.riderName.trim().length > 0 &&
       state.raceNumber.trim().length > 0,
   );
 }

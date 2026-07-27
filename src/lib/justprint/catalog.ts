@@ -62,6 +62,10 @@ export function findCatalogDesignById(id: string): StorefrontDesign | null {
   return getCatalogDesigns().find((design) => design.id === id) ?? null;
 }
 
+export function findCatalogLogoById(id: string): StorefrontLogo | null {
+  return getCatalogLogos().find((logo) => logo.id === id) ?? null;
+}
+
 export function getBikeBrands(): string[] {
   return Array.from(new Set(getCatalogBikes().map((bike) => bike.brand))).sort();
 }

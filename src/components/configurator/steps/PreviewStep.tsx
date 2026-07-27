@@ -22,6 +22,7 @@ import {
   previewModeHelpText,
 } from "@/lib/bike-preview";
 import { sortLogosByProminence } from "@/lib/logo-prominence";
+import { getDisplayConfigurationId } from "@/lib/storage";
 import type { ConfiguratorStep, PreviewView } from "@/types/configurator";
 
 const VIEWS: { id: PreviewView; label: string }[] = [
@@ -197,7 +198,9 @@ export function PreviewStep({
             />
             <SummaryRow
               label="Identifiant"
-              value={state.configurationId ?? "En préparation…"}
+              value={
+                getDisplayConfigurationId(state) ?? "En préparation…"
+              }
             />
           </div>
         ) : null}
