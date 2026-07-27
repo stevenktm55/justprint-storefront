@@ -1,36 +1,189 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# JustPrint Storefront
 
-## Getting Started
+Application **storefront multi-boutique** JustPrint.  
+Une seule app Next.js, intégrable en iframe sur plusieurs sites clients, sélectionnés via le paramètre URL `shop`.
 
-First, run the development server:
+RawMoto est la **première boutique configurée** — pas le nom du projet.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## JustPrint vs JustPrint Storefront
+
+| | Rôle |
+|---|---|
+| **JustPrint** | Plateforme / API centrale (catalogue, configurations, aperçus, production). Backend hors de ce dépôt. |
+| **JustPrint Storefront** | Interface client (ce dépôt) : parcours configurateur, aperçus locaux mock, bridge Shopify / iframe. |
+
+Ce dépôt ne contient **pas** le backend JustPrint.
+
+## Multi-boutique
+
+Chaque boutique a une configuration `StorefrontTenantConfig` :
+
+- identité (id, name, logo)
+- thème (couleurs)
+- textes configurateur
+- origines parent autorisées (`allowedParentOrigins`)
+- features (3D/2D, logos, panier Shopify, comptes, etc.)
+
+Lookup centralisé :
+
+```ts
+getTenantConfig(shopId)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+RawMoto : `src/tenants/rawmoto.ts` (`id: "rawmoto"`).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Contexte React : `StorefrontTenantProvider` expose `tenant`, `shopId`, `theme`, `features`, `allowedParentOrigins`.  
+Les composants ne doivent pas relire `?shop=` eux-mêmes.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Paramètre `shop`
 
-## Learn More
+Route principale :
 
-To learn more about Next.js, take a look at the following resources:
+```text
+/configurator?shop=rawmoto
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Environnement | `shop` absent | `shop` inconnu |
+|---|---|---|
+| **Development** | défaut `NEXT_PUBLIC_DEFAULT_SHOP` (`rawmoto`) | erreur propre |
+| **Production** | erreur propre | erreur propre |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Jamais de fallback silencieux vers une autre boutique.
 
-## Deploy on Vercel
+## Mode mock (actuel)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+`NEXT_PUBLIC_JUSTPRINT_MODE=mock` (défaut) :
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- catalogue local RawMoto (motos 2D/3D, designs, logos)
+- configurations simulées en mémoire
+- aperçus locaux inchangés
+- **aucun backend requis**
+
+## Mode connecté (futur)
+
+`NEXT_PUBLIC_JUSTPRINT_MODE=remote` + `NEXT_PUBLIC_JUSTPRINT_API_URL` :
+
+- bootstrap / create / update / preview / complete via HTTP
+- les composants React n’appellent jamais `fetch` directement
+- brouillon `localStorage` conservé en cas d’indisponibilité
+
+## Installation
+
+```bash
+npm install
+cp .env.example .env.local
+npm run dev
+```
+
+Ouvrir : [http://localhost:3000/configurator?shop=rawmoto](http://localhost:3000/configurator?shop=rawmoto)
+
+## Variables d’environnement
+
+Voir `.env.example` :
+
+| Variable | Rôle |
+|---|---|
+| `NEXT_PUBLIC_APP_ENV` | `development` \| `production` \| `preview` |
+| `NEXT_PUBLIC_JUSTPRINT_MODE` | `mock` \| `remote` |
+| `NEXT_PUBLIC_JUSTPRINT_API_URL` | Base API JustPrint (remote) |
+| `NEXT_PUBLIC_DEFAULT_SHOP` | Défaut local si `shop` absent |
+
+Aucune donnée sensible dans les variables `NEXT_PUBLIC_*`.
+
+## Déploiement Vercel
+
+Projet Vercel cible : **`justprint-storefront`**.
+
+```bash
+npm install
+npm run build
+```
+
+Sur Vercel, définir notamment :
+
+```text
+NEXT_PUBLIC_APP_ENV=production
+NEXT_PUBLIC_JUSTPRINT_MODE=mock
+NEXT_PUBLIC_DEFAULT_SHOP=rawmoto
+```
+
+URL attendue après déploiement :
+
+```text
+/configurator?shop=rawmoto
+```
+
+## Intégration iframe
+
+Headers CSP `frame-ancestors` (pas de `X-Frame-Options: DENY` / `SAMEORIGIN`) :
+
+- `https://rawmoto.fr`
+- `https://www.rawmoto.fr`
+- localhost (développement uniquement)
+- domaines Shopify / myshopify à ajouter plus tard
+
+Exemple d’embed :
+
+```html
+<iframe
+  src="https://<vercel-app>/configurator?shop=rawmoto"
+  title="JustPrint Storefront — RawMoto"
+  allow="fullscreen"
+></iframe>
+```
+
+## Sécurité postMessage
+
+**Entrant** : origine vérifiée strictement contre la liste autorisée (jamais `"*"`).
+
+**Sortant** (configuration complétée) :
+
+- origine parent autorisée lorsqu’elle est connue (referrer matching)
+- `"*"` **uniquement en développement local** (commentaire explicite dans le code)
+- production : jamais `"*"`
+
+RawMoto — origines parent préparées :
+
+- `https://rawmoto.fr`
+- `https://www.rawmoto.fr`
+- (futur) domaine myshopify RawMoto
+
+## Configuration RawMoto
+
+| Champ | Valeur |
+|---|---|
+| id | `rawmoto` |
+| name | RawMoto |
+| couleurs | inchangées (`#ff5a00`, `#f4f4f2`, `#0a0a0a`) |
+| catalogue | motos mock 2D/3D, designs, catégories logos |
+| features | aperçus 2D/3D, bibliothèque logos, placement auto |
+
+Le parcours produit RawMoto (5 étapes, sticky preview, localStorage, etc.) est conservé.
+
+## Architecture
+
+```text
+src/
+  app/configurator/page.tsx     # résout ?shop=
+  tenants/                      # configs boutique + getTenantConfig
+  context/StorefrontTenantContext.tsx
+  context/StorefrontContext.tsx # bootstrap JustPrint + sync
+  lib/shopify-bridge.ts         # postMessage sécurisé
+  lib/justprint/                # client mock / remote
+  types/tenant.ts
+```
+
+## Scripts
+
+```bash
+npm run lint
+npm run build
+npm start
+```
+
+## Suite (hors scope)
+
+1. Backend JustPrint réel
+2. Ajout panier Shopify réel
+3. Nouveaux tenants clients
+4. Domaines Shopify preview dans CSP / `allowedParentOrigins`
