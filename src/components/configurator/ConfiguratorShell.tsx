@@ -5,7 +5,10 @@ import { useSearchParams } from "next/navigation";
 import { ConfiguratorHeader } from "@/components/configurator/ConfiguratorHeader";
 import { DesktopPreview } from "@/components/configurator/DesktopPreview";
 import { ProgressBar } from "@/components/configurator/ProgressBar";
-import { RestoreDraftNotice } from "@/components/configurator/RestoreDraftNotice";
+import {
+  IncompatibleDraftNotice,
+  RestoreDraftNotice,
+} from "@/components/configurator/RestoreDraftNotice";
 import { StickyActionBar } from "@/components/configurator/StickyActionBar";
 import { StickyMobilePreview } from "@/components/configurator/StickyMobilePreview";
 import { BottomSheet } from "@/components/configurator/ui/BottomSheet";
@@ -118,6 +121,7 @@ export function ConfiguratorShell() {
     goPrev,
     resetConfiguration,
     dismissRestoreNotice,
+    dismissIncompatibleDraftNotice,
     isHydrated,
   } = useConfigurator();
   const {
@@ -475,6 +479,10 @@ export function ConfiguratorShell() {
         visible={isHydrated && state.draftRestored}
         onDismiss={dismissRestoreNotice}
         onReset={resetConfiguration}
+      />
+      <IncompatibleDraftNotice
+        visible={isHydrated && state.incompatibleDraftReset && !state.draftRestored}
+        onDismiss={dismissIncompatibleDraftNotice}
       />
 
       <StickyMobilePreview visible={showStickyMobilePreview} />

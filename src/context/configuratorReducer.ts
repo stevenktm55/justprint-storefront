@@ -20,7 +20,9 @@ import {
 
 export type ConfiguratorAction =
   | { type: "HYDRATE_DRAFT"; payload: ConfiguratorState }
+  | { type: "INCOMPATIBLE_DRAFT_RESET" }
   | { type: "DISMISS_RESTORE_NOTICE" }
+  | { type: "DISMISS_INCOMPATIBLE_DRAFT_NOTICE" }
   | { type: "RESET" }
   | { type: "SET_STEP"; payload: ConfiguratorStep }
   | { type: "NEXT_STEP" }
@@ -100,10 +102,20 @@ export function configuratorReducer(
         ...action.payload,
         returnToFinalPreview: false,
         draftRestored: true,
+        incompatibleDraftReset: false,
+      };
+
+    case "INCOMPATIBLE_DRAFT_RESET":
+      return {
+        ...createInitialState(),
+        incompatibleDraftReset: true,
       };
 
     case "DISMISS_RESTORE_NOTICE":
       return { ...state, draftRestored: false };
+
+    case "DISMISS_INCOMPATIBLE_DRAFT_NOTICE":
+      return { ...state, incompatibleDraftReset: false };
 
     case "RESET":
       return createInitialState();

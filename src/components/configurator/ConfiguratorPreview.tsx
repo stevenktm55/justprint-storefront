@@ -10,6 +10,7 @@ import type {
   PaletteColor,
   SelectedLogo,
 } from "@/types/configurator";
+import { createInitialState } from "@/types/configurator";
 
 export interface ConfiguratorPreviewProps {
   bike: BikeSelection | null;
@@ -52,6 +53,7 @@ function buildStateFromProps(
 
   // Minimal state shell when only discrete fields are provided.
   return {
+    ...createInitialState(),
     currentStep: 5,
     bike: props.bike,
     selectedDesign: props.selectedDesign,
@@ -64,14 +66,6 @@ function buildStateFromProps(
     selectedLogos: props.selectedLogos,
     previewView: props.previewView ?? "left",
     productionChecks: [],
-    configurationId: null,
-    publicId: null,
-    editToken: null,
-    configurationStatus: null,
-    lastSavedAt: null,
-    synchronizationStatus: "idle",
-    draftRestored: false,
-    returnToFinalPreview: false,
   };
 }
 

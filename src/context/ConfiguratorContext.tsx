@@ -27,6 +27,7 @@ interface ConfiguratorContextValue {
   goPrev: () => void;
   resetConfiguration: () => void;
   dismissRestoreNotice: () => void;
+  dismissIncompatibleDraftNotice: () => void;
   isHydrated: boolean;
 }
 
@@ -64,10 +65,13 @@ export function ConfiguratorProvider({ children }: { children: ReactNode }) {
     if (!isHydrated || didRestoreRef.current) return;
     didRestoreRef.current = true;
 
-    const draft = loadDraft();
-    if (draft) {
+    const result = loadDraft();
+    if (result.status === "restored") {
       skipNextPersistRef.current = true;
-      dispatch({ type: "HYDRATE_DRAFT", payload: draft });
+      dispatch({ type: "HYDRATE_DRAFT", payload: result.state });
+    } else if (result.status === "incompatible_reset") {
+      skipNextPersistRef.current = true;
+      dispatch({ type: "INCOMPATIBLE_DRAFT_RESET" });
     } else {
       skipNextPersistRef.current = false;
     }
@@ -91,6 +95,7 @@ export function ConfiguratorProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const resetConfiguration = useCallback(() => {
+    // Local draft only — never deletes the remote JustPrint configuration.
     clearDraft();
     skipNextPersistRef.current = true;
     dispatch({ type: "RESET" });
@@ -98,6 +103,10 @@ export function ConfiguratorProvider({ children }: { children: ReactNode }) {
 
   const dismissRestoreNotice = useCallback(() => {
     dispatch({ type: "DISMISS_RESTORE_NOTICE" });
+  }, []);
+
+  const dismissIncompatibleDraftNotice = useCallback(() => {
+    dispatch({ type: "DISMISS_INCOMPATIBLE_DRAFT_NOTICE" });
   }, []);
 
   const value = useMemo(
@@ -108,6 +117,7 @@ export function ConfiguratorProvider({ children }: { children: ReactNode }) {
       goPrev,
       resetConfiguration,
       dismissRestoreNotice,
+      dismissIncompatibleDraftNotice,
       isHydrated,
     }),
     [
@@ -116,6 +126,7 @@ export function ConfiguratorProvider({ children }: { children: ReactNode }) {
       goPrev,
       resetConfiguration,
       dismissRestoreNotice,
+      dismissIncompatibleDraftNotice,
       isHydrated,
     ],
   );

@@ -148,7 +148,14 @@ export type JustPrintCompletionResult = JustPrintPreviewResult & {
   configurationId: string;
 };
 
+/** Version du schéma de brouillon localStorage (structure remote actuelle). */
+export const CURRENT_DRAFT_SCHEMA_VERSION = 2 as const;
+
+export type DraftSchemaVersion = typeof CURRENT_DRAFT_SCHEMA_VERSION;
+
 export interface ConfiguratorState {
+  /** Schéma du brouillon local — bumpé lors des migrations incompatibles. */
+  draftSchemaVersion: DraftSchemaVersion;
   currentStep: ConfiguratorStep;
   bike: BikeSelection | null;
   selectedDesign: string | null;
@@ -174,6 +181,8 @@ export interface ConfiguratorState {
   lastSavedAt: string | null;
   synchronizationStatus: SynchronizationStatus;
   draftRestored: boolean;
+  /** Shown once when an obsolete local draft was discarded on load. */
+  incompatibleDraftReset: boolean;
   /** When true, design selection returns to the final preview without resetting other choices. */
   returnToFinalPreview: boolean;
 }
@@ -209,6 +218,7 @@ export const DEFAULT_PRODUCTION_CHECKS: ProductionCheck[] = [
 
 export function createInitialState(): ConfiguratorState {
   return {
+    draftSchemaVersion: CURRENT_DRAFT_SCHEMA_VERSION,
     currentStep: 1,
     bike: null,
     selectedDesign: null,
@@ -228,6 +238,7 @@ export function createInitialState(): ConfiguratorState {
     lastSavedAt: null,
     synchronizationStatus: "idle",
     draftRestored: false,
+    incompatibleDraftReset: false,
     returnToFinalPreview: false,
   };
 }

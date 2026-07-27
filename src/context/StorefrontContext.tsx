@@ -122,6 +122,14 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
     } else if (!state.configurationId) {
       serverCredentialsRef.current = null;
     }
+
+    // After « Recommencer à zéro » (or empty state), allow a fresh remote create.
+    if (!state.bike && !state.selectedDesign && !state.configurationId) {
+      createAttemptedKeyRef.current = null;
+      lastSyncedSignatureRef.current = null;
+      createPromiseRef.current = null;
+      creatingRef.current = false;
+    }
   }, [state]);
 
   const snapshotContext = useMemo(

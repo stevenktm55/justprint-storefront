@@ -7,17 +7,24 @@ import type {
 } from "@/types/configurator";
 import {
   createInitialState,
+  CURRENT_DRAFT_SCHEMA_VERSION,
   DEFAULT_PALETTE,
   DEFAULT_PRODUCTION_CHECKS,
 } from "@/types/configurator";
 import type {
   ConfigurationStatus,
-  SynchronizationStatus,
 } from "@/types/justprint";
+import {
+  findCatalogBike,
+  findCatalogBikeById,
+  findCatalogDesignById,
+} from "@/lib/justprint/catalog";
 import { resolveBikeSelection } from "@/lib/bike-preview";
+import { buildCompletionSummary } from "@/lib/cart-summary";
 
 export const DRAFT_STORAGE_KEY = "rawmoto-configurator-draft";
 export const COMPLETED_STORAGE_KEY = "rawmoto-configurator-completed";
+export { CURRENT_DRAFT_SCHEMA_VERSION };
 
 function isBrowser(): boolean {
   return typeof window !== "undefined";
@@ -102,31 +109,92 @@ function normalizeProductionChecks(value: unknown): ProductionCheck[] {
     .filter((item): item is ProductionCheck => item !== null);
 }
 
-function normalizeBike(rawBike: unknown) {
+function coerceYear(value: unknown): string {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(Math.trunc(value));
+  }
+  return "";
+}
+
+function coerceNonEmptyString(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
+
+/** Design id + display name — accepts legacy string id or `{ id, name }`. */
+export function parseSelectedDesign(
+  value: unknown,
+): { id: string; name: string } | null {
+  if (typeof value === "string" && value.trim()) {
+    const id = value.trim();
+    const fromCatalog = findCatalogDesignById(id);
+    return { id, name: fromCatalog?.name ?? id };
+  }
+
+  if (!isRecord(value)) return null;
+
+  const id = typeof value.id === "string" ? value.id.trim() : "";
+  const name = typeof value.name === "string" ? value.name.trim() : "";
+  if (!id || !name) return null;
+  return { id, name };
+}
+
+/**
+ * Validates raw bike essentials before restore.
+ * Requires id, brand, model, year, and a resolvable previewMode.
+ */
+export function parseBikeEssentials(rawBike: unknown): {
+  id: string;
+  brand: string;
+  model: string;
+  year: string;
+  previewMode: "2d" | "3d";
+  model3dId?: unknown;
+  template2dId?: unknown;
+  thumbnailUrl?: unknown;
+  availableViews?: unknown;
+  pieceIds?: unknown;
+  previewUrl?: unknown;
+} | null {
   if (!isRecord(rawBike)) return null;
 
-  const brand = typeof rawBike.brand === "string" ? rawBike.brand : "";
-  const model = typeof rawBike.model === "string" ? rawBike.model : "";
-  const year =
-    typeof rawBike.year === "string"
-      ? rawBike.year
-      : typeof rawBike.year === "number"
-        ? String(rawBike.year)
-        : "";
+  const id = typeof rawBike.id === "string" ? rawBike.id.trim() : "";
+  const brand = typeof rawBike.brand === "string" ? rawBike.brand.trim() : "";
+  const model = typeof rawBike.model === "string" ? rawBike.model.trim() : "";
+  const year = coerceYear(rawBike.year);
 
-  return resolveBikeSelection({
-    id: typeof rawBike.id === "string" ? rawBike.id : undefined,
+  if (!id || !brand || !model || !year) return null;
+
+  let previewMode: "2d" | "3d" | null =
+    rawBike.previewMode === "2d" || rawBike.previewMode === "3d"
+      ? rawBike.previewMode
+      : null;
+
+  if (!previewMode) {
+    const fromCatalog =
+      findCatalogBikeById(id) ?? findCatalogBike(brand, model, year);
+    previewMode = fromCatalog?.previewMode ?? null;
+  }
+
+  if (!previewMode) return null;
+
+  return {
+    id,
     brand,
     model,
     year,
-    previewMode: rawBike.previewMode,
+    previewMode,
     model3dId: rawBike.model3dId,
     template2dId: rawBike.template2dId,
     thumbnailUrl: rawBike.thumbnailUrl,
     availableViews: rawBike.availableViews,
     pieceIds: rawBike.pieceIds,
     previewUrl: rawBike.previewUrl,
-  });
+  };
 }
 
 function normalizeConfigurationStatus(
@@ -143,21 +211,16 @@ function normalizeConfigurationStatus(
   return null;
 }
 
-function normalizeSynchronizationStatus(
-  value: unknown,
-): SynchronizationStatus {
-  if (
-    value === "idle" ||
-    value === "creating" ||
-    value === "saving" ||
-    value === "saved" ||
-    value === "finalizing" ||
-    value === "finalized" ||
-    value === "error"
-  ) {
-    return value;
-  }
-  return "idle";
+/** Legacy / demo ids that must never be reused against the remote API. */
+export function isLegacyMockConfigurationId(id: string): boolean {
+  const normalized = id.trim().toUpperCase();
+  return (
+    normalized === "RAW-DEMO" ||
+    normalized.startsWith("RAW-DEMO") ||
+    normalized === "DEMO" ||
+    normalized === "LOCAL" ||
+    normalized === "MOCK"
+  );
 }
 
 /**
@@ -170,48 +233,152 @@ export function hasValidServerConfiguration(
     "configurationId" | "publicId" | "editToken" | "configurationStatus"
   >,
 ): boolean {
-  return Boolean(
-    state.configurationId &&
-      state.publicId &&
-      state.editToken &&
-      state.configurationStatus !== "finalized",
-  );
+  if (
+    !state.configurationId ||
+    !state.publicId ||
+    !state.editToken ||
+    state.configurationStatus === "finalized"
+  ) {
+    return false;
+  }
+  if (isLegacyMockConfigurationId(state.configurationId)) {
+    return false;
+  }
+  return true;
 }
 
-export function migrateDraft(raw: unknown): ConfiguratorState | null {
-  if (!isRecord(raw)) return null;
+export type MigrateDraftResult =
+  | {
+      status: "ok";
+      state: ConfiguratorState;
+      /** Server credentials were stripped (incomplete, mock, or finalized). */
+      serverCleared: boolean;
+      wasFinalized: boolean;
+    }
+  | { status: "discard"; reason: "invalid_shape" | "missing_essentials" };
+
+/**
+ * Migrates and validates a raw localStorage draft.
+ * Incompatible essentials → discard. Incomplete server triple → clear server, keep client.
+ */
+export function migrateDraft(raw: unknown): MigrateDraftResult {
+  if (!isRecord(raw)) {
+    return { status: "discard", reason: "invalid_shape" };
+  }
+
+  const rawHasBike = isRecord(raw.bike);
+  const rawHasDesign =
+    raw.selectedDesign != null &&
+    raw.selectedDesign !== "" &&
+    !(isRecord(raw.selectedDesign) && Object.keys(raw.selectedDesign).length === 0);
+
+  const bikeEssentials = rawHasBike ? parseBikeEssentials(raw.bike) : null;
+  const selectedDesign = rawHasDesign
+    ? parseSelectedDesign(raw.selectedDesign)
+    : null;
+
+  // Claimed bike/design that fail validation → incompatible draft.
+  if (rawHasBike && !bikeEssentials) {
+    return { status: "discard", reason: "missing_essentials" };
+  }
+  if (rawHasDesign && !selectedDesign) {
+    return { status: "discard", reason: "missing_essentials" };
+  }
+
+  // Nothing usable to restore.
+  if (!bikeEssentials && !selectedDesign) {
+    const logos = normalizeSelectedLogos(raw.selectedLogos);
+    const riderName = typeof raw.riderName === "string" ? raw.riderName : "";
+    if (!riderName && logos.length === 0 && normalizeStep(raw.currentStep) <= 1) {
+      return { status: "discard", reason: "missing_essentials" };
+    }
+    // Logos / name without bike+design is not a coherent remote draft.
+    return { status: "discard", reason: "missing_essentials" };
+  }
+
+  const raceNumber = coerceNonEmptyString(raw.raceNumber);
+  // Race number is required once personalization-level data exists; otherwise default.
+  const resolvedRaceNumber =
+    raceNumber ??
+    (typeof raw.raceNumber === "undefined" || raw.raceNumber === null
+      ? "17"
+      : null);
+  if (!resolvedRaceNumber) {
+    return { status: "discard", reason: "missing_essentials" };
+  }
+
+  const normalizedBike = bikeEssentials
+    ? resolveBikeSelection({
+        id: bikeEssentials.id,
+        brand: bikeEssentials.brand,
+        model: bikeEssentials.model,
+        year: bikeEssentials.year,
+        previewMode: bikeEssentials.previewMode,
+        model3dId: bikeEssentials.model3dId,
+        template2dId: bikeEssentials.template2dId,
+        thumbnailUrl: bikeEssentials.thumbnailUrl,
+        availableViews: bikeEssentials.availableViews,
+        pieceIds: bikeEssentials.pieceIds,
+        previewUrl: bikeEssentials.previewUrl,
+      })
+    : null;
+
+  if (bikeEssentials && !normalizedBike?.id) {
+    return { status: "discard", reason: "missing_essentials" };
+  }
+
+  if (
+    normalizedBike &&
+    (!normalizedBike.brand ||
+      !normalizedBike.model ||
+      !normalizedBike.year ||
+      !normalizedBike.previewMode)
+  ) {
+    return { status: "discard", reason: "missing_essentials" };
+  }
 
   const base = createInitialState();
-  const normalizedBike = normalizeBike(raw.bike);
-
   const selectedLogos = normalizeSelectedLogos(raw.selectedLogos);
-
   const configurationStatus = normalizeConfigurationStatus(
     raw.configurationStatus,
   );
 
-  // Legacy drafts only had configurationId (mock id) — keep local progress,
-  // but clear incomplete server triples so remote create can run later.
   const configurationId =
-    typeof raw.configurationId === "string" ? raw.configurationId : null;
-  const publicId = typeof raw.publicId === "string" ? raw.publicId : null;
-  const editToken = typeof raw.editToken === "string" ? raw.editToken : null;
+    typeof raw.configurationId === "string" && raw.configurationId.trim()
+      ? raw.configurationId.trim()
+      : null;
+  const publicId =
+    typeof raw.publicId === "string" && raw.publicId.trim()
+      ? raw.publicId.trim()
+      : null;
+  const editToken =
+    typeof raw.editToken === "string" && raw.editToken.trim()
+      ? raw.editToken.trim()
+      : null;
 
+  const wasFinalized = configurationStatus === "finalized";
   const hasFullServerTriple = Boolean(
-    configurationId && publicId && editToken,
+    configurationId &&
+      publicId &&
+      editToken &&
+      !isLegacyMockConfigurationId(configurationId),
   );
+
+  // Incomplete / mock / finalized triples → clear so a fresh remote draft can be created.
+  // Only keep a server link when bike + design are both confirmed (remote create needs both).
+  const keepServer =
+    hasFullServerTriple &&
+    !wasFinalized &&
+    Boolean(normalizedBike && selectedDesign);
 
   const migrated: ConfiguratorState = {
     ...base,
+    draftSchemaVersion: CURRENT_DRAFT_SCHEMA_VERSION,
     currentStep: normalizeStep(raw.currentStep),
     bike: normalizedBike,
-    selectedDesign:
-      typeof raw.selectedDesign === "string" ? raw.selectedDesign : null,
+    selectedDesign: selectedDesign?.id ?? null,
     riderName: typeof raw.riderName === "string" ? raw.riderName : "",
-    raceNumber:
-      typeof raw.raceNumber === "string" && raw.raceNumber.trim()
-        ? raw.raceNumber
-        : base.raceNumber,
+    raceNumber: resolvedRaceNumber,
     plateColor:
       typeof raw.plateColor === "string" ? raw.plateColor : base.plateColor,
     numberColor:
@@ -228,33 +395,45 @@ export function migrateDraft(raw: unknown): ConfiguratorState | null {
         ? raw.previewView
         : "left",
     productionChecks: normalizeProductionChecks(raw.productionChecks),
-    configurationId: hasFullServerTriple ? configurationId : null,
-    publicId: hasFullServerTriple ? publicId : null,
-    editToken: hasFullServerTriple ? editToken : null,
-    configurationStatus: hasFullServerTriple
+    configurationId: keepServer ? configurationId : null,
+    publicId: keepServer ? publicId : null,
+    editToken: keepServer ? editToken : null,
+    configurationStatus: keepServer
       ? (configurationStatus ?? "draft")
       : null,
     lastSavedAt:
-      typeof raw.lastSavedAt === "string" ? raw.lastSavedAt : null,
-    synchronizationStatus:
-      configurationStatus === "finalized"
-        ? "finalized"
-        : normalizeSynchronizationStatus(raw.synchronizationStatus),
+      keepServer && typeof raw.lastSavedAt === "string"
+        ? raw.lastSavedAt
+        : null,
+    synchronizationStatus: "idle",
     draftRestored: true,
     returnToFinalPreview: false,
   };
 
-  // Finalized configs must not seed a new kit — drop server link, keep choices.
-  if (migrated.configurationStatus === "finalized") {
-    migrated.configurationId = null;
-    migrated.publicId = null;
-    migrated.editToken = null;
-    migrated.configurationStatus = null;
-    migrated.lastSavedAt = null;
-    migrated.synchronizationStatus = "idle";
+  const serverCleared =
+    !keepServer &&
+    Boolean(configurationId || publicId || editToken || wasFinalized);
+
+  if (wasFinalized) {
+    // Keep a summary of the last order; start a fresh local draft from the same choices.
+    try {
+      saveCompletedConfiguration({
+        summary: buildCompletionSummary(migrated),
+        publicId,
+        configurationId,
+        source: "finalized-draft-migration",
+      });
+    } catch {
+      // Ignore summary persistence errors.
+    }
   }
 
-  return migrated;
+  return {
+    status: "ok",
+    state: migrated,
+    serverCleared,
+    wasFinalized,
+  };
 }
 
 export function hasDraftProgress(state: Pick<
@@ -288,40 +467,71 @@ export function saveDraft(state: ConfiguratorState): void {
 
   const {
     draftRestored: _draftRestored,
+    incompatibleDraftReset: _incompatibleReset,
     returnToFinalPreview: _returnFlag,
     synchronizationStatus: _sync,
     ...persisted
   } = state;
   void _draftRestored;
+  void _incompatibleReset;
   void _returnFlag;
   void _sync;
 
   try {
-    window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(persisted));
+    window.localStorage.setItem(
+      DRAFT_STORAGE_KEY,
+      JSON.stringify({
+        ...persisted,
+        draftSchemaVersion: CURRENT_DRAFT_SCHEMA_VERSION,
+      }),
+    );
   } catch {
     // Ignore quota / private mode errors.
   }
 }
 
-export function loadDraft(): ConfiguratorState | null {
-  if (!isBrowser()) return null;
+export type LoadDraftResult =
+  | { status: "empty" }
+  | { status: "restored"; state: ConfiguratorState }
+  | { status: "incompatible_reset" };
+
+export function loadDraft(): LoadDraftResult {
+  if (!isBrowser()) return { status: "empty" };
 
   try {
     const raw = window.localStorage.getItem(DRAFT_STORAGE_KEY);
-    if (!raw) return null;
+    if (!raw) return { status: "empty" };
 
     const parsed: unknown = JSON.parse(raw);
     const migrated = migrateDraft(parsed);
-    if (!migrated || !hasDraftProgress(migrated)) {
-      return null;
+
+    if (migrated.status === "discard") {
+      window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+      return { status: "incompatible_reset" };
     }
 
-    return migrated;
+    if (!hasDraftProgress(migrated.state)) {
+      window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+      return { status: "empty" };
+    }
+
+    // Rewrite storage with the migrated schema so incomplete server ids never linger.
+    saveDraft({ ...migrated.state, draftRestored: false });
+
+    return { status: "restored", state: migrated.state };
   } catch {
-    return null;
+    try {
+      window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+    } catch {
+      // Ignore.
+    }
+    return { status: "incompatible_reset" };
   }
 }
 
+/**
+ * Clears the local draft only — never deletes a remote JustPrint configuration.
+ */
 export function clearDraft(): void {
   if (!isBrowser()) return;
   window.localStorage.removeItem(DRAFT_STORAGE_KEY);
