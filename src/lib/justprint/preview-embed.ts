@@ -1,10 +1,15 @@
+import { isClassicDesignId } from "@/lib/justprint/catalog";
 import { getJustPrintEnvironment } from "@/lib/justprint/environment";
 import type { ConfiguratorStep, PreviewMode } from "@/types/configurator";
 import type { StorefrontViewerDisplayMode } from "@/types/justprint";
 
 /** Cas pilote remote — seul combo avec moteur JustPrint embarqué pour l’instant. */
 export const REMOTE_PILOT_BIKE_ID = "yamaha-450-yzf-2025";
+/** Slug storefront historique — préférer `isClassicDesignId` (accepte aussi l’UUID). */
 export const REMOTE_PILOT_DESIGN_ID = "classic";
+/** UUID interne JustPrint du design CLASSIC (Yamaha 450 YZF 2025). */
+export const REMOTE_PILOT_DESIGN_INTERNAL_ID =
+  "7b841fac-b0e9-4b97-96cc-745434d8c090";
 
 export type RemotePreviewKind =
   | "mock_local"
@@ -18,10 +23,14 @@ export function isRemotePilot3dSupported(
   designId: string | null | undefined,
   previewMode: PreviewMode,
 ): boolean {
+  const isClassic =
+    designId === REMOTE_PILOT_DESIGN_ID ||
+    designId === REMOTE_PILOT_DESIGN_INTERNAL_ID ||
+    isClassicDesignId(designId);
   return (
     previewMode === "3d" &&
     bikeId === REMOTE_PILOT_BIKE_ID &&
-    designId === REMOTE_PILOT_DESIGN_ID
+    isClassic
   );
 }
 

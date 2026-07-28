@@ -16,6 +16,7 @@ import { usePersistentStorefrontViewer } from "@/context/PersistentStorefrontVie
 import {
   formatBikeLabel,
   formatLogoProminenceLine,
+  formatSelectedColors,
   getDesignName,
 } from "@/lib/cart-summary";
 import {
@@ -209,12 +210,9 @@ export function PreviewStep({
             <SummaryRow label="Numéro" value={state.raceNumber || "—"} />
             <SummaryRow
               label="Couleurs"
-              value={[
-                state.plateColor,
-                state.numberColor,
-                state.nameColor,
-                ...state.palette.map((color) => color.hex),
-              ].join(" · ")}
+              value={
+                formatSelectedColors(state).join(" · ") || "—"
+              }
             />
             <SummaryRow
               label="Logos"

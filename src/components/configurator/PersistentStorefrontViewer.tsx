@@ -360,12 +360,14 @@ export function PersistentStorefrontViewer() {
   ]);
 
   // LOAD / REFRESH saved design — never change iframe src.
+  // version must be an integer ≥ 1 (viewer rejects ISO timestamps / editToken).
   useEffect(() => {
     if (!src || !iframeReadyForMessages) return;
     const savedDesignId = state.savedDesignId;
     if (!savedDesignId) return;
 
-    const version = state.lastSavedAt ?? "0";
+    const version = state.synchronizationVersion;
+    if (!Number.isFinite(version) || version < 1) return;
 
     if (loadedDesignIdRef.current !== savedDesignId) {
       postToViewer({
@@ -374,7 +376,7 @@ export function PersistentStorefrontViewer() {
         version,
       });
       loadedDesignIdRef.current = savedDesignId;
-      lastSyncVersionRef.current = version;
+      lastSyncVersionRef.current = String(version);
       bumpMetric("loadSavedDesignMessages");
       if (IS_DEV) {
         console.info("[PersistentStorefrontViewer] LOAD_SAVED_DESIGN", {
@@ -385,13 +387,13 @@ export function PersistentStorefrontViewer() {
       return;
     }
 
-    if (lastSyncVersionRef.current !== version) {
+    if (lastSyncVersionRef.current !== String(version)) {
       postToViewer({
         type: "JUSTPRINT_REFRESH_SAVED_DESIGN",
         savedDesignId,
         version,
       });
-      lastSyncVersionRef.current = version;
+      lastSyncVersionRef.current = String(version);
       if (IS_DEV) {
         console.info("[PersistentStorefrontViewer] REFRESH_SAVED_DESIGN", {
           savedDesignId,
@@ -403,7 +405,7 @@ export function PersistentStorefrontViewer() {
     src,
     iframeReadyForMessages,
     state.savedDesignId,
-    state.lastSavedAt,
+    state.synchronizationVersion,
     postToViewer,
     bumpMetric,
   ]);
@@ -446,8 +448,17 @@ export function PersistentStorefrontViewer() {
         case "JUSTPRINT_PREVIEW_UPDATED":
           setViewerStatus("ready");
           setViewerError(null);
-          if (IS_DEV && msg.type === "JUSTPRINT_PREVIEW_READY") {
-            console.info("[PersistentStorefrontViewer] PREVIEW_READY");
+          if (IS_DEV) {
+            const textureMs =
+              preloadStartedAtRef.current != null
+                ? Math.round(performance.now() - preloadStartedAtRef.current)
+                : null;
+            console.info(`[PersistentStorefrontViewer] ${msg.type}`, {
+              version: "version" in msg ? msg.version : null,
+              textureMs,
+              iframeMounts: metrics.iframeMounts,
+              srcChanges: metrics.srcChanges,
+            });
           }
           break;
         case "JUSTPRINT_PREVIEW_ERROR":

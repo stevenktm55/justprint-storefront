@@ -32,9 +32,18 @@ export type ConfiguratorAction =
   | { type: "SET_RIDER_NAME"; payload: string }
   | { type: "SET_RACE_NUMBER"; payload: string }
   | { type: "SET_PLATE_COLOR"; payload: string }
+  | {
+      type: "SET_PLATE_SELECTION";
+      payload: PaletteColor;
+    }
   | { type: "SET_NUMBER_COLOR"; payload: string }
   | { type: "SET_NAME_COLOR"; payload: string }
   | { type: "SET_PALETTE_COLOR"; payload: { id: string; hex: string } }
+  | {
+      type: "SET_SLOT_COLOR";
+      payload: PaletteColor;
+    }
+  | { type: "RESTORE_SLOT_COLORS"; payload: { palette: PaletteColor[]; plateColor?: string } }
   | { type: "TOGGLE_LOGO"; payload: { id: string; name: string } }
   | {
       type: "SET_LOGO_PROMINENCE";
@@ -55,13 +64,17 @@ export type ConfiguratorAction =
         editToken: string;
         status: ConfigurationStatus;
         lastSavedAt?: string | null;
+        synchronizationVersion?: number;
       };
     }
   | { type: "SET_SAVED_DESIGN_ID"; payload: string }
   | { type: "SET_PUBLIC_ID"; payload: string }
   | { type: "SET_CONFIGURATION_STATUS"; payload: ConfigurationStatus }
   | { type: "SET_LAST_SAVED_AT"; payload: string | null }
+  | { type: "SET_SYNCHRONIZATION_VERSION"; payload: number }
+  | { type: "BUMP_SYNCHRONIZATION_VERSION" }
   | { type: "SET_SYNCHRONIZATION_STATUS"; payload: SynchronizationStatus }
+  | { type: "SET_COLOR_SAVE_ERROR"; payload: string | null }
   | { type: "CLEAR_SERVER_CONFIGURATION" }
   | { type: "APPLY_DESIGN_PALETTE"; payload: PaletteColor[] }
   | { type: "SET_RETURN_TO_FINAL_PREVIEW"; payload: boolean }
@@ -159,7 +172,21 @@ export function configuratorReducer(
       return { ...state, raceNumber: action.payload };
 
     case "SET_PLATE_COLOR":
-      return { ...state, plateColor: action.payload };
+      return { ...state, plateColor: action.payload, colorSaveError: null };
+
+    case "SET_PLATE_SELECTION":
+      return {
+        ...state,
+        plateColor: action.payload.hex,
+        colorSaveError: null,
+        palette: state.palette.some((c) => c.id === "plate" || c.isPlate)
+          ? state.palette.map((color) =>
+              color.id === "plate" || color.isPlate
+                ? { ...action.payload, id: color.id, isPlate: true }
+                : color,
+            )
+          : state.palette,
+      };
 
     case "SET_NUMBER_COLOR":
       return { ...state, numberColor: action.payload };
@@ -170,15 +197,37 @@ export function configuratorReducer(
     case "SET_PALETTE_COLOR":
       return {
         ...state,
+        colorSaveError: null,
         palette: state.palette.map((color) =>
           color.id === action.payload.id
-            ? { ...color, hex: action.payload.hex }
+            ? { ...color, hex: action.payload.hex, archived: false }
             : color,
         ),
       };
 
+    case "SET_SLOT_COLOR":
+      return {
+        ...state,
+        colorSaveError: null,
+        plateColor: action.payload.isPlate
+          ? action.payload.hex
+          : state.plateColor,
+        palette: state.palette.some((c) => c.id === action.payload.id)
+          ? state.palette.map((color) =>
+              color.id === action.payload.id ? action.payload : color,
+            )
+          : [...state.palette, action.payload],
+      };
+
+    case "RESTORE_SLOT_COLORS":
+      return {
+        ...state,
+        palette: action.payload.palette,
+        plateColor: action.payload.plateColor ?? state.plateColor,
+      };
+
     case "APPLY_DESIGN_PALETTE":
-      return { ...state, palette: action.payload };
+      return { ...state, palette: action.payload, colorSaveError: null };
 
     case "TOGGLE_LOGO": {
       const exists = state.selectedLogos.some(
@@ -260,6 +309,9 @@ export function configuratorReducer(
         editToken: action.payload.editToken,
         configurationStatus: action.payload.status,
         lastSavedAt: action.payload.lastSavedAt ?? state.lastSavedAt,
+        synchronizationVersion:
+          action.payload.synchronizationVersion ??
+          Math.max(state.synchronizationVersion, 1),
         synchronizationStatus:
           action.payload.status === "finalized" ? "finalized" : state.synchronizationStatus,
       };
@@ -273,8 +325,20 @@ export function configuratorReducer(
     case "SET_LAST_SAVED_AT":
       return { ...state, lastSavedAt: action.payload };
 
+    case "SET_SYNCHRONIZATION_VERSION":
+      return { ...state, synchronizationVersion: action.payload };
+
+    case "BUMP_SYNCHRONIZATION_VERSION":
+      return {
+        ...state,
+        synchronizationVersion: Math.max(1, state.synchronizationVersion + 1),
+      };
+
     case "SET_SYNCHRONIZATION_STATUS":
       return { ...state, synchronizationStatus: action.payload };
+
+    case "SET_COLOR_SAVE_ERROR":
+      return { ...state, colorSaveError: action.payload };
 
     case "CLEAR_SERVER_CONFIGURATION":
       return {
@@ -284,7 +348,9 @@ export function configuratorReducer(
         editToken: null,
         configurationStatus: null,
         lastSavedAt: null,
+        synchronizationVersion: 0,
         synchronizationStatus: "idle",
+        colorSaveError: null,
       };
 
     default:

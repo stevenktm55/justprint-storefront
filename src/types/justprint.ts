@@ -1,17 +1,81 @@
-import type { PaletteColor, PreviewMode, PreviewView } from "@/types/configurator";
+import type { PreviewMode, PreviewView } from "@/types/configurator";
 
 /** Boutique storefront JustPrint. */
 export interface StorefrontShop {
   id: string;
   name: string;
   slug: string;
+  label?: string;
+  /** UUID `shops.id` JustPrint — jamais un secret. */
+  justprintShopId?: string | null;
+}
+
+/** CMJN 0–100 tel qu’enregistré en admin (jamais recalculé côté Storefront). */
+export interface StorefrontCmyk {
+  c: number;
+  m: number;
+  y: number;
+  k: number;
+}
+
+export interface StorefrontRgb {
+  r: number;
+  g: number;
+  b: number;
+}
+
+/**
+ * Sélection riche transmise au saved_design (`personalization.colorSelections`).
+ * `hex` est requis ; CMJN / colorId / name sont conservés depuis la bibliothèque.
+ */
+export interface StorefrontColorSelection {
+  colorId?: string | null;
+  hex: string;
+  name?: string | null;
+  cmyk?: StorefrontCmyk | null;
+  libraryId?: string | null;
+}
+
+/** Couleur d’une bibliothèque boutique (bootstrap `colorLibraries[].colors[]`). */
+export interface StorefrontLibraryColor {
+  id: string;
+  name: string;
+  hex: string;
+  rgb?: StorefrontRgb | null;
+  cmyk?: StorefrontCmyk | null;
+  displayOrder: number;
+  active?: boolean;
+}
+
+/** Bibliothèque de couleurs publique (une ou plusieurs par boutique). */
+export interface StorefrontColorLibrary {
+  id: string;
+  name: string;
+  shopId: string;
+  active: boolean;
+  colors: StorefrontLibraryColor[];
+  /** Ordre d’affichage optionnel renvoyé par l’API. */
+  displayOrder?: number;
+}
+
+/** Valeur par défaut d’un slot (bootstrap). */
+export interface StorefrontColorSlotDefault {
+  hex: string;
+  colorId: string | null;
+  name: string | null;
+  cmyk: StorefrontCmyk | null;
+  libraryId?: string | null;
 }
 
 export interface StorefrontColorSlot {
   key: string;
   label: string;
+  /** HEX d’affichage / fallback (égal à defaultValue.hex quand présent). */
   defaultHex: string;
+  defaultValue?: StorefrontColorSlotDefault;
+  originalHex?: string;
   isPlate?: boolean;
+  slotIndex?: number;
 }
 
 type StorefrontBikeBase = {
@@ -21,8 +85,10 @@ type StorefrontBikeBase = {
   year: string;
   thumbnailUrl?: string;
   previewUrl?: string;
-  /** Slots couleur issus du bootstrap JustPrint (pilote remote). */
+  /** Slots au niveau moto (alias historique — préférer design.colorSlots). */
   colorSlots?: StorefrontColorSlot[];
+  /** UUID produit JustPrint si fourni via `products`. */
+  internalProductId?: string;
 };
 
 /** Moto avec modèle 3D JustPrint. */
@@ -44,13 +110,26 @@ export type StorefrontBike2D = StorefrontBikeBase & {
 export type StorefrontBike = StorefrontBike3D | StorefrontBike2D;
 
 export interface StorefrontDesign {
+  /**
+   * Identifiant utilisé pour la sélection UI et le saved_design.
+   * Remote : UUID interne JustPrint quand disponible ; sinon slug storefront.
+   */
   id: string;
+  /** Slug storefront (ex. `classic`) — utile pour les gates pilote. */
+  storefrontId?: string;
   name: string;
   badge: string;
   description: string;
+  /** Miniature réelle du design (remote) ou accents dérivés (mock). */
+  thumbnailUrl?: string | null;
+  /** Accents d’affichage dérivés des slots — mock / fallback UI uniquement. */
   accentColors: [string, string, string];
+  /** Slots de couleurs du design (source de vérité remote). */
+  colorSlots?: StorefrontColorSlot[];
   /** Optional bike ids this design is compatible with. Empty / omitted = all. */
   compatibleBikeIds?: string[];
+  productionTemplateId?: string;
+  kitColorHexList?: string[];
 }
 
 /** Catégories mock historiques + ids libres renvoyés par le bootstrap remote. */
@@ -75,6 +154,8 @@ export interface StorefrontBootstrap {
   designs: StorefrontDesign[];
   logoCategories: StorefrontLogoCategory[];
   logos: StorefrontLogo[];
+  /** Bibliothèques de couleurs de la boutique (remote). Absentes en mock si non seedées. */
+  colorLibraries: StorefrontColorLibrary[];
 }
 
 /** Server-side configuration lifecycle (JustPrint API). */
@@ -96,6 +177,23 @@ export type SynchronizationStatus =
 
 /** @deprecated Prefer SynchronizationStatus */
 export type SyncStatus = SynchronizationStatus;
+
+/** Couleur de palette / slot dans l’état configurateur. */
+export interface PaletteColor {
+  /** Clé technique du slot (ex. primary) — utilisée pour le PATCH. */
+  id: string;
+  /** Label public du slot. */
+  label: string;
+  hex: string;
+  colorId?: string | null;
+  libraryId?: string | null;
+  name?: string | null;
+  rgb?: StorefrontRgb | null;
+  cmyk?: StorefrontCmyk | null;
+  /** Couleur absente de la bibliothèque mais encore présente dans le brouillon. */
+  archived?: boolean;
+  isPlate?: boolean;
+}
 
 export interface ConfigurationPersonalization {
   riderName: string;
@@ -133,7 +231,10 @@ export interface StorefrontConfigurationData {
     riderName: string;
     raceNumber: string;
     plateColor?: string | null;
+    /** Map slotKey → HEX (pipeline historique). */
     colors: Record<string, string>;
+    /** Sélections riches (colorId + CMJN) — source de vérité admin. */
+    colorSelections?: Record<string, StorefrontColorSelection>;
   };
   logos?: Array<{
     logoId: string;
@@ -257,25 +358,33 @@ export type JustPrintPreviewMessage =
   | {
       type: "JUSTPRINT_MODEL_PRELOAD_STARTED";
       bikeId?: string;
+      shop?: string;
+      bike?: string;
     }
   | {
       type: "JUSTPRINT_MODEL_PRELOADED";
       bikeId?: string;
+      shop?: string;
+      bike?: string;
+      elapsedMs?: number;
     }
   | {
       type: "JUSTPRINT_SAVED_DESIGN_APPLYING";
       savedDesignId?: string;
       configurationId?: string;
+      version?: number;
     }
   | {
       type: "JUSTPRINT_PREVIEW_READY";
       configurationId?: string;
       savedDesignId?: string;
+      version?: number | null;
     }
   | {
       type: "JUSTPRINT_PREVIEW_UPDATED";
       configurationId?: string;
       savedDesignId?: string;
+      version?: number;
       previewUrl?: string;
     }
   | {
@@ -283,6 +392,7 @@ export type JustPrintPreviewMessage =
       configurationId?: string;
       savedDesignId?: string;
       message: string;
+      code?: string;
     };
 
 /** Messages sortants Storefront → iframe viewer persistant. */
@@ -290,12 +400,13 @@ export type JustPrintViewerOutboundMessage =
   | {
       type: "JUSTPRINT_LOAD_SAVED_DESIGN";
       savedDesignId: string;
-      version: string;
+      /** Entier ≥ 1 — jamais un ISO timestamp, jamais l’editToken. */
+      version: number;
     }
   | {
       type: "JUSTPRINT_REFRESH_SAVED_DESIGN";
       savedDesignId: string;
-      version: string;
+      version: number;
     }
   | {
       type: "JUSTPRINT_SET_DISPLAY_MODE";

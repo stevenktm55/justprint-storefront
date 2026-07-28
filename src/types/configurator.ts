@@ -1,5 +1,6 @@
 import type {
   ConfigurationStatus,
+  PaletteColor,
   StorefrontBike,
   StorefrontBike2D,
   StorefrontBike3D,
@@ -8,6 +9,8 @@ import type {
   StorefrontLogoCategoryId,
   SynchronizationStatus,
 } from "@/types/justprint";
+
+export type { PaletteColor } from "@/types/justprint";
 
 export type ConfiguratorStep = 1 | 2 | 3 | 4 | 5;
 
@@ -42,12 +45,6 @@ export interface ProductionCheck {
   id: string;
   label: string;
   status: CheckStatus;
-}
-
-export interface PaletteColor {
-  id: string;
-  label: string;
-  hex: string;
 }
 
 export interface ShopifyQueryParams {
@@ -153,7 +150,7 @@ export type JustPrintCompletionResult = JustPrintPreviewResult & {
 };
 
 /** Version du schéma de brouillon localStorage (saved_designs). */
-export const CURRENT_DRAFT_SCHEMA_VERSION = 3 as const;
+export const CURRENT_DRAFT_SCHEMA_VERSION = 4 as const;
 
 export type DraftSchemaVersion = typeof CURRENT_DRAFT_SCHEMA_VERSION;
 
@@ -186,12 +183,19 @@ export interface ConfiguratorState {
   editToken: string | null;
   configurationStatus: ConfigurationStatus | null;
   lastSavedAt: string | null;
+  /**
+   * Compteur monotone ≥ 1 envoyé au viewer (LOAD / REFRESH).
+   * Incrémenté uniquement après un PATCH réussi — jamais l’editToken.
+   */
+  synchronizationVersion: number;
   synchronizationStatus: SynchronizationStatus;
   draftRestored: boolean;
   /** Shown once when an obsolete local draft was discarded on load. */
   incompatibleDraftReset: boolean;
   /** When true, design selection returns to the final preview without resetting other choices. */
   returnToFinalPreview: boolean;
+  /** Erreur locale de sélection couleur (rollback) — distincte du syncError global. */
+  colorSaveError: string | null;
 }
 
 export const TOTAL_STEPS = 5 as const;
@@ -204,11 +208,15 @@ export const STEP_LABELS: Record<ConfiguratorStep, string> = {
   5: "Aperçu final",
 };
 
+/**
+ * Palette de secours — mode mock uniquement.
+ * Le parcours remote construit la palette depuis design.colorSlots.
+ */
 export const DEFAULT_PALETTE: PaletteColor[] = [
-  { id: "primary", label: "Orange", hex: "#FF5A00" },
-  { id: "secondary", label: "Noir", hex: "#111111" },
-  { id: "tertiary", label: "Blanc", hex: "#FFFFFF" },
-  { id: "accent", label: "Bleu", hex: "#0066FF" },
+  { id: "primary", label: "Orange", hex: "#FF5A00", name: "Orange" },
+  { id: "secondary", label: "Noir", hex: "#111111", name: "Noir" },
+  { id: "tertiary", label: "Blanc", hex: "#FFFFFF", name: "Blanc" },
+  { id: "accent", label: "Bleu", hex: "#0066FF", name: "Bleu" },
 ];
 
 export const DEFAULT_PRODUCTION_CHECKS: ProductionCheck[] = [
@@ -234,7 +242,7 @@ export function createInitialState(): ConfiguratorState {
     plateColor: "#FFFFFF",
     numberColor: "#111111",
     nameColor: "#FFFFFF",
-    palette: DEFAULT_PALETTE.map((color) => ({ ...color })),
+    palette: [],
     selectedLogos: [],
     previewView: "left",
     productionChecks: DEFAULT_PRODUCTION_CHECKS.map((check) => ({ ...check })),
@@ -243,9 +251,22 @@ export function createInitialState(): ConfiguratorState {
     editToken: null,
     configurationStatus: null,
     lastSavedAt: null,
+    synchronizationVersion: 0,
     synchronizationStatus: "idle",
     draftRestored: false,
     incompatibleDraftReset: false,
     returnToFinalPreview: false,
+    colorSaveError: null,
   };
+}
+
+/** Affiche le nom public d’une couleur de palette (jamais seulement le HEX si un nom existe). */
+export function formatPaletteColorLabel(color: PaletteColor): string {
+  if (color.archived && color.name) {
+    return `${color.name} (Couleur archivée)`;
+  }
+  if (color.archived) {
+    return `Couleur archivée · ${color.hex.toUpperCase()}`;
+  }
+  return color.name?.trim() || color.hex.toUpperCase();
 }

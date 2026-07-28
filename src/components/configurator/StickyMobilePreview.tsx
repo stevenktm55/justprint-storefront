@@ -63,9 +63,11 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
   if (!visible) return null;
 
   const statusHint =
-    viewerStatus === "ready" || viewerStatus === "model-ready"
-      ? "Aperçu prêt"
-      : "Préparation de ton aperçu…";
+    viewerStatus === "applying-design"
+      ? "Mise à jour…"
+      : viewerStatus === "ready" || viewerStatus === "model-ready"
+        ? "Aperçu prêt"
+        : "Préparation de ton aperçu…";
 
   // Persistent 3D — layout slot only; the single iframe lives in PersistentStorefrontViewer.
   // Do not wrap the slot in a click-to-expand hit target: the iframe handles rotate/zoom.
@@ -78,6 +80,11 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
               className="h-full w-full"
               label="Aperçu 3D compact"
             />
+            {viewerStatus === "applying-design" ? (
+              <div className="pointer-events-none absolute bottom-2 left-2 z-[1] rounded bg-black/55 px-2 py-1 text-[10px] font-semibold text-white">
+                Mise à jour…
+              </div>
+            ) : null}
             {isExpanded ? (
               <div className="pointer-events-none absolute inset-0 z-[1] flex flex-col items-center justify-center gap-1 bg-[#e9e9e6] text-xs text-[var(--rm-text-muted)]">
                 <span>Aperçu agrandi</span>

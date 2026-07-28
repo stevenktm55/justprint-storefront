@@ -1,8 +1,13 @@
 import { getBikePreviewMode, isBike2D, isBike3D } from "@/lib/bike-preview";
-import { findCatalogDesignById, findCatalogLogoById } from "@/lib/justprint/catalog";
+import {
+  findCatalogDesignById,
+  findCatalogLogoById,
+} from "@/lib/justprint/catalog";
+import { normalizeHex, paletteColorToSelection } from "@/lib/justprint/colors";
 import { getLogoProminenceDefinition } from "@/lib/logo-prominence";
 import type { ConfiguratorState } from "@/types/configurator";
 import type {
+  StorefrontColorSelection,
   StorefrontConfigurationCreateBody,
   StorefrontConfigurationData,
   StorefrontConfigurationPatchBody,
@@ -18,6 +23,7 @@ export interface SnapshotContext {
 /**
  * Builds the versioned configurationData snapshot expected by JustPrint.
  * Uses real ids/values from configurator state — never includes editToken.
+ * Persists both HEX `colors` and rich `colorSelections` (colorId + CMJN).
  */
 export function buildConfigurationSnapshot(
   state: ConfiguratorState,
@@ -29,14 +35,39 @@ export function buildConfigurationSnapshot(
   const previewMode = getBikePreviewMode(bike);
 
   const colors: Record<string, string> = {};
+  const colorSelections: Record<string, StorefrontColorSelection> = {};
+
   for (const swatch of state.palette) {
-    colors[swatch.id] = swatch.hex;
+    const hex = normalizeHex(swatch.hex);
+    colors[swatch.id] = hex;
+    colorSelections[swatch.id] = paletteColorToSelection(swatch);
   }
+
+  // Plate slot — also mirrored in colors.plate when present.
+  if (state.plateColor) {
+    const plateHex = normalizeHex(state.plateColor);
+    colors.plate = plateHex;
+    const plateSwatch = state.palette.find((p) => p.isPlate || p.id === "plate");
+    if (plateSwatch) {
+      colorSelections.plate = paletteColorToSelection({
+        ...plateSwatch,
+        hex: plateHex,
+      });
+    } else {
+      colorSelections.plate = {
+        hex: plateHex,
+        name: null,
+        colorId: null,
+        cmyk: null,
+      };
+    }
+  }
+
   if (state.numberColor) {
-    colors.number = state.numberColor;
+    colors.number = normalizeHex(state.numberColor);
   }
   if (state.nameColor) {
-    colors.name = state.nameColor;
+    colors.name = normalizeHex(state.nameColor);
   }
 
   const logos = state.selectedLogos.map((logo) => {
@@ -51,6 +82,10 @@ export function buildConfigurationSnapshot(
       source: catalogLogo ? "catalog" : "custom",
     };
   });
+
+  // Prefer internal UUID ; fall back to storefront slug.
+  const resolvedDesignId = design?.id ?? designId ?? undefined;
+  const resolvedDesignName = design?.name ?? designId ?? undefined;
 
   return {
     version: 1,
@@ -69,16 +104,15 @@ export function buildConfigurationSnapshot(
         }
       : undefined,
     design:
-      designId && design
-        ? { id: design.id, name: design.name }
-        : designId
-          ? { id: designId, name: designId }
-          : undefined,
+      resolvedDesignId && resolvedDesignName
+        ? { id: resolvedDesignId, name: resolvedDesignName }
+        : undefined,
     personalization: {
       riderName: state.riderName,
       raceNumber: state.raceNumber,
-      plateColor: state.plateColor || null,
+      plateColor: state.plateColor ? normalizeHex(state.plateColor) : null,
       colors,
+      colorSelections,
     },
     logos,
     storefront: {
@@ -99,11 +133,13 @@ export function buildCreateConfigurationBody(
   }
 
   const configurationData = buildConfigurationSnapshot(state, context);
+  const design = findCatalogDesignById(state.selectedDesign);
+  const designId = design?.id ?? state.selectedDesign;
 
   return {
     shopId: context.shopId,
     bikeId: state.bike.id,
-    designId: state.selectedDesign,
+    designId,
     previewMode: getBikePreviewMode(state.bike),
     configurationData,
   };
@@ -114,10 +150,13 @@ export function buildPatchConfigurationBody(
   context: SnapshotContext,
 ): StorefrontConfigurationPatchBody {
   const configurationData = buildConfigurationSnapshot(state, context);
+  const design = state.selectedDesign
+    ? findCatalogDesignById(state.selectedDesign)
+    : null;
 
   return {
     bikeId: state.bike?.id ?? null,
-    designId: state.selectedDesign ?? null,
+    designId: design?.id ?? state.selectedDesign ?? null,
     previewMode: getBikePreviewMode(state.bike),
     configurationData,
   };

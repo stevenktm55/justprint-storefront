@@ -1,6 +1,7 @@
 import type {
   StorefrontBike,
   StorefrontBootstrap,
+  StorefrontColorLibrary,
   StorefrontDesign,
   StorefrontLogo,
   StorefrontLogoCategory,
@@ -33,6 +34,10 @@ export function getCatalogDesigns(): StorefrontDesign[] {
   return catalog?.designs ?? [];
 }
 
+export function getCatalogColorLibraries(): StorefrontColorLibrary[] {
+  return catalog?.colorLibraries ?? [];
+}
+
 export function getCatalogLogoCategories(): StorefrontLogoCategory[] {
   return catalog?.logoCategories ?? [];
 }
@@ -59,7 +64,29 @@ export function findCatalogBikeById(id: string): StorefrontBike | null {
 }
 
 export function findCatalogDesignById(id: string): StorefrontDesign | null {
-  return getCatalogDesigns().find((design) => design.id === id) ?? null;
+  const designs = getCatalogDesigns();
+  return (
+    designs.find((design) => design.id === id) ??
+    designs.find((design) => design.storefrontId === id) ??
+    null
+  );
+}
+
+/** True when the design is the RawMoto CLASSIC pilot (UUID or slug). */
+export function isClassicDesign(
+  design: StorefrontDesign | null | undefined,
+): boolean {
+  if (!design) return false;
+  return (
+    design.storefrontId === "classic" ||
+    design.id === "classic" ||
+    design.name.toUpperCase() === "CLASSIC"
+  );
+}
+
+export function isClassicDesignId(designId: string | null | undefined): boolean {
+  if (!designId) return false;
+  return isClassicDesign(findCatalogDesignById(designId));
 }
 
 export function findCatalogLogoById(id: string): StorefrontLogo | null {

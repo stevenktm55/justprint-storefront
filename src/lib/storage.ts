@@ -8,7 +8,6 @@ import type {
 import {
   createInitialState,
   CURRENT_DRAFT_SCHEMA_VERSION,
-  DEFAULT_PALETTE,
   DEFAULT_PRODUCTION_CHECKS,
 } from "@/types/configurator";
 import type {
@@ -71,19 +70,50 @@ function normalizeSelectedLogos(value: unknown): SelectedLogo[] {
 
 function normalizePalette(value: unknown): PaletteColor[] {
   if (!Array.isArray(value) || value.length === 0) {
-    return DEFAULT_PALETTE.map((color) => ({ ...color }));
+    return [];
   }
 
-  return value
-    .map((item) => {
-      if (!isRecord(item)) return null;
-      const id = typeof item.id === "string" ? item.id : null;
-      const label = typeof item.label === "string" ? item.label : null;
-      const hex = typeof item.hex === "string" ? item.hex : null;
-      if (!id || !label || !hex) return null;
-      return { id, label, hex };
-    })
-    .filter((item): item is PaletteColor => item !== null);
+  const palette: PaletteColor[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const id = typeof item.id === "string" ? item.id : null;
+    const label = typeof item.label === "string" ? item.label : null;
+    const hex = typeof item.hex === "string" ? item.hex : null;
+    if (!id || !label || !hex) continue;
+    const cmyk =
+      isRecord(item.cmyk) &&
+      typeof item.cmyk.c === "number" &&
+      typeof item.cmyk.m === "number" &&
+      typeof item.cmyk.y === "number" &&
+      typeof item.cmyk.k === "number"
+        ? {
+            c: item.cmyk.c,
+            m: item.cmyk.m,
+            y: item.cmyk.y,
+            k: item.cmyk.k,
+          }
+        : null;
+    const rgb =
+      isRecord(item.rgb) &&
+      typeof item.rgb.r === "number" &&
+      typeof item.rgb.g === "number" &&
+      typeof item.rgb.b === "number"
+        ? { r: item.rgb.r, g: item.rgb.g, b: item.rgb.b }
+        : null;
+    palette.push({
+      id,
+      label,
+      hex,
+      colorId: typeof item.colorId === "string" ? item.colorId : null,
+      libraryId: typeof item.libraryId === "string" ? item.libraryId : null,
+      name: typeof item.name === "string" ? item.name : null,
+      cmyk,
+      rgb,
+      archived: item.archived === true,
+      isPlate: item.isPlate === true,
+    });
+  }
+  return palette;
 }
 
 function normalizeProductionChecks(value: unknown): ProductionCheck[] {
@@ -376,10 +406,19 @@ export function migrateDraft(raw: unknown): MigrateDraftResult {
   // Schema < 3 belongs to the old storefront_configurations flow — never reuse
   // those ids against saved-designs. Also clear incomplete / mock / finalized.
   const keepServer =
-    rawSchemaVersion >= CURRENT_DRAFT_SCHEMA_VERSION &&
+    rawSchemaVersion >= 3 &&
     hasFullServerTriple &&
     !wasFinalized &&
     Boolean(normalizedBike && selectedDesign);
+
+  const synchronizationVersion =
+    typeof raw.synchronizationVersion === "number" &&
+    Number.isFinite(raw.synchronizationVersion) &&
+    raw.synchronizationVersion >= 1
+      ? Math.floor(raw.synchronizationVersion)
+      : keepServer
+        ? 1
+        : 0;
 
   const migrated: ConfiguratorState = {
     ...base,
@@ -415,9 +454,11 @@ export function migrateDraft(raw: unknown): MigrateDraftResult {
       keepServer && typeof raw.lastSavedAt === "string"
         ? raw.lastSavedAt
         : null,
+    synchronizationVersion: keepServer ? synchronizationVersion : 0,
     synchronizationStatus: "idle",
     draftRestored: true,
     returnToFinalPreview: false,
+    colorSaveError: null,
   };
 
   const serverCleared =

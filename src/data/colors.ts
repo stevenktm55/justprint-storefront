@@ -1,10 +1,16 @@
+/**
+ * @deprecated MOCK MODE ONLY — do not import from remote UI components.
+ * Remote parcours uses bootstrap `colorLibraries`.
+ * Kept for legacy references / documentation; Prefer mock-bootstrap seeding.
+ */
+
 export interface LibraryColor {
   id: string;
   name: string;
   hex: string;
 }
 
-/** Fictional demo palette — 20 production-friendly colors. */
+/** Fictional demo palette — mock mode seed only. */
 export const COLOR_LIBRARY: LibraryColor[] = [
   { id: "c01", name: "Orange Raw", hex: "#FF5A00" },
   { id: "c02", name: "Noir Mat", hex: "#111111" },

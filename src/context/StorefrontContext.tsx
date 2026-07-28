@@ -28,6 +28,7 @@ import type {
   ConfigurationStatus,
   FinalizeSavedDesignResponse,
   StorefrontBootstrap,
+  StorefrontColorLibrary,
   StorefrontDesign,
   StorefrontLogo,
   StorefrontLogoCategory,
@@ -44,6 +45,7 @@ interface StorefrontContextValue {
   reloadBootstrap: () => void;
   bikes: StorefrontBike[];
   designs: StorefrontDesign[];
+  colorLibraries: StorefrontColorLibrary[];
   logoCategories: StorefrontLogoCategory[];
   logos: StorefrontLogo[];
   shopId: string;
@@ -118,6 +120,13 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
   const flushResolversRef = useRef<Array<() => void>>([]);
   const debounceTimerRef = useRef<number | null>(null);
   const syncPausedRef = useRef(false);
+  /** Snapshot confirmed by last successful PATCH — used for color rollback. */
+  const confirmedColorRef = useRef<{
+    palette: ConfiguratorState["palette"];
+    plateColor: string;
+    signature: string;
+  } | null>(null);
+  const colorPatchSeqRef = useRef(0);
   const serverCredentialsRef = useRef<{
     savedDesignId: string;
     publicId: string;
@@ -172,6 +181,10 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
       try {
         const data = await getStorefrontBootstrap(shopId);
         if (cancelled) return;
+        const colorCount = (data.colorLibraries ?? []).reduce(
+          (sum, lib) => sum + (lib.colors?.length ?? 0),
+          0,
+        );
         logSavedDesignSync({
           step: "bootstrap",
           endpoint: "/api/storefront/bootstrap",
@@ -179,7 +192,16 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
           ok: true,
           bikeId: data.bikes[0]?.id ?? null,
           designId: data.designs[0]?.id ?? null,
+          message: `libraries=${data.colorLibraries?.length ?? 0} colors=${colorCount}`,
         });
+        if (process.env.NODE_ENV === "development") {
+          console.info("[storefront/bootstrap]", {
+            libraries: data.colorLibraries?.length ?? 0,
+            colors: colorCount,
+            designs: data.designs.length,
+            bikes: data.bikes.length,
+          });
+        }
         setBootstrap(data);
         setBootstrapStatus("ready");
       } catch (error) {
@@ -237,8 +259,11 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
       }
 
       const signature = buildSyncSignature(draftState);
+      const patchSeq = ++colorPatchSeqRef.current;
+      const patchStartedAt = performance.now();
       setSync("saving");
       setSyncError(null);
+      dispatch({ type: "SET_COLOR_SAVE_ERROR", payload: null });
 
       try {
         const result = await updateSavedDesign(
@@ -246,6 +271,7 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
           draftState.editToken,
           buildPatchConfigurationBody(draftState, snapshotContext),
         );
+        const patchMs = Math.round(performance.now() - patchStartedAt);
         logSavedDesignSync({
           step: "patch",
           endpoint: `/api/storefront/saved-designs/${draftState.savedDesignId}`,
@@ -255,10 +281,18 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
           designId: draftState.selectedDesign,
           raceNumberPresent: Boolean(draftState.raceNumber.trim()),
           savedDesignIdPresent: true,
+          message: `patchMs=${patchMs}`,
         });
+
+        // Ignore stale responses if a newer color change superseded this PATCH.
+        if (patchSeq !== colorPatchSeqRef.current) {
+          return true;
+        }
+
         lastSyncedSignatureRef.current = signature;
         const savedAt = result.updatedAt;
         dispatch({ type: "SET_LAST_SAVED_AT", payload: savedAt });
+        dispatch({ type: "BUMP_SYNCHRONIZATION_VERSION" });
         dispatch({
           type: "SET_CONFIGURATION_STATUS",
           payload: toConfigurationStatus(result.status),
@@ -266,13 +300,28 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
         if (result.publicId) {
           dispatch({ type: "SET_PUBLIC_ID", payload: result.publicId });
         }
+        confirmedColorRef.current = {
+          palette: draftState.palette,
+          plateColor: draftState.plateColor,
+          signature,
+        };
         setSync("saved");
+        const nextVersion = Math.max(1, draftState.synchronizationVersion + 1);
+        if (process.env.NODE_ENV === "development") {
+          console.info("[storefront/patch]", {
+            designId: draftState.selectedDesign,
+            version: nextVersion,
+            patchMs,
+          });
+        }
         saveDraft({
           ...draftState,
           publicId: result.publicId || draftState.publicId,
           configurationStatus: toConfigurationStatus(result.status),
           lastSavedAt: savedAt,
+          synchronizationVersion: nextVersion,
           synchronizationStatus: "saved",
+          colorSaveError: null,
         });
         return true;
       } catch (error) {
@@ -290,6 +339,24 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
           savedDesignIdPresent: true,
           message,
         });
+
+        // Rollback colors only when this is still the latest PATCH attempt.
+        if (patchSeq === colorPatchSeqRef.current && confirmedColorRef.current) {
+          dispatch({
+            type: "RESTORE_SLOT_COLORS",
+            payload: {
+              palette: confirmedColorRef.current.palette,
+              plateColor: confirmedColorRef.current.plateColor,
+            },
+          });
+          lastSyncedSignatureRef.current =
+            confirmedColorRef.current.signature;
+          dispatch({
+            type: "SET_COLOR_SAVE_ERROR",
+            payload: "Impossible d’enregistrer cette couleur.",
+          });
+        }
+
         setSyncError(message);
         setSync("error");
         return false;
@@ -391,15 +458,29 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
               editToken: created.editToken,
               status: toConfigurationStatus(created.status),
               lastSavedAt: created.createdAt,
+              synchronizationVersion: 1,
             },
           });
 
-          lastSyncedSignatureRef.current = buildSyncSignature({
+          const createdSignature = buildSyncSignature({
             ...draftState,
             savedDesignId,
             publicId: created.publicId,
             editToken: created.editToken,
           });
+          lastSyncedSignatureRef.current = createdSignature;
+          confirmedColorRef.current = {
+            palette: draftState.palette,
+            plateColor: draftState.plateColor,
+            signature: createdSignature,
+          };
+
+          if (process.env.NODE_ENV === "development") {
+            console.info("[storefront/create]", {
+              designId: draftState.selectedDesign,
+              version: 1,
+            });
+          }
 
           saveDraft({
             ...draftState,
@@ -408,6 +489,7 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
             editToken: created.editToken,
             configurationStatus: toConfigurationStatus(created.status),
             lastSavedAt: created.createdAt,
+            synchronizationVersion: 1,
             synchronizationStatus: "saved",
           });
 
@@ -665,6 +747,7 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
       reloadBootstrap,
       bikes: bootstrap?.bikes ?? [],
       designs: bootstrap?.designs ?? [],
+      colorLibraries: bootstrap?.colorLibraries ?? [],
       logoCategories: features.enableLogoLibrary
         ? (bootstrap?.logoCategories ?? [])
         : [],

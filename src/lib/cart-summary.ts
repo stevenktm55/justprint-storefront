@@ -10,6 +10,7 @@ import type {
   JustPrintAddToCartSummary,
   ShopifyCartSummary,
 } from "@/types/configurator";
+import { formatPaletteColorLabel } from "@/types/configurator";
 
 export function formatBikeLabel(
   bike: ConfiguratorState["bike"],
@@ -21,6 +22,22 @@ export function formatBikeLabel(
 export function getDesignName(designId: string | null): string {
   if (!designId) return "—";
   return findCatalogDesignById(designId)?.name ?? "—";
+}
+
+/** Public color names for summaries (not HEX-only). */
+export function formatSelectedColors(state: ConfiguratorState): string[] {
+  const labels: string[] = [];
+  const plate = state.palette.find((c) => c.isPlate || c.id === "plate");
+  if (plate) {
+    labels.push(formatPaletteColorLabel(plate));
+  } else if (state.plateColor) {
+    labels.push(state.plateColor.toUpperCase());
+  }
+  for (const color of state.palette) {
+    if (color.isPlate || color.id === "plate") continue;
+    labels.push(formatPaletteColorLabel(color));
+  }
+  return labels;
 }
 
 export function buildCompletionSummary(
@@ -40,7 +57,7 @@ export function buildCompletionSummary(
     design: getDesignName(state.selectedDesign),
     riderName: state.riderName || "—",
     raceNumber: state.raceNumber || "—",
-    colors: state.palette.map((color) => color.hex),
+    colors: formatSelectedColors(state),
     logos,
     previewMode: getBikePreviewMode(state.bike),
   };
@@ -61,7 +78,7 @@ export function buildShopifyCartSummary(
     designName: getDesignName(state.selectedDesign),
     riderName: state.riderName,
     raceNumber: state.raceNumber,
-    selectedColors: state.palette.map((color) => color.hex),
+    selectedColors: formatSelectedColors(state),
     selectedLogoNames: sorted.map((logo) => logo.name),
     selectedLogoCount: sorted.length,
     previewMode: getBikePreviewMode(state.bike),
@@ -82,7 +99,7 @@ export function buildAddToCartSummary(
     riderName: state.riderName,
     raceNumber: state.raceNumber,
     previewMode: getBikePreviewMode(state.bike),
-    selectedColors: state.palette.map((color) => color.hex),
+    selectedColors: formatSelectedColors(state),
     selectedLogoNames: sorted.map((logo) => logo.name),
     selectedLogoCount: sorted.length,
   };

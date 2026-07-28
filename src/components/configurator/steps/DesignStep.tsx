@@ -1,32 +1,43 @@
 "use client";
 
 import { SelectionCard } from "@/components/configurator/ui/SelectionCard";
-import { DEFAULT_PALETTE } from "@/types/configurator";
 import { useConfigurator } from "@/context/ConfiguratorContext";
 import { useStorefront } from "@/context/StorefrontContext";
+import {
+  buildPaletteFromSlots,
+  resolveDesignColorSlots,
+  resolvePlateFromSlots,
+  swatchBackground,
+} from "@/lib/justprint/colors";
+import { isJustPrintMockMode } from "@/lib/justprint-client";
+import { DEFAULT_PALETTE } from "@/types/configurator";
+import type { StorefrontDesign } from "@/types/justprint";
 
-function DesignPlaceholder({ colors }: { colors: [string, string, string] }) {
+function DesignThumbnail({ design }: { design: StorefrontDesign }) {
+  if (design.thumbnailUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={design.thumbnailUrl}
+        alt=""
+        className="h-full w-full object-cover"
+      />
+    );
+  }
+
+  const colors = design.accentColors;
   return (
     <div className="relative h-full w-full overflow-hidden">
       <div
         className="absolute inset-0"
         style={{
-          background: `linear-gradient(135deg, ${colors[0]} 0%, ${colors[1]} 55%, ${colors[2]} 100%)`,
+          background: `linear-gradient(135deg, ${swatchBackground({ hex: colors[0] })} 0%, ${swatchBackground({ hex: colors[1] })} 55%, ${swatchBackground({ hex: colors[2] })} 100%)`,
         }}
       />
-      <div className="absolute inset-0 opacity-30">
-        <div
-          className="absolute -right-6 top-4 h-28 w-44 rotate-[-18deg] rounded-sm"
-          style={{ backgroundColor: colors[2] }}
-        />
-        <div
-          className="absolute bottom-8 left-4 h-20 w-32 rotate-[12deg] rounded-sm"
-          style={{ backgroundColor: colors[0] }}
-        />
-        <div
-          className="absolute right-8 bottom-10 h-10 w-24 rotate-[-8deg] rounded-sm"
-          style={{ backgroundColor: colors[1] }}
-        />
+      <div className="absolute inset-0 flex items-end p-3">
+        <span className="font-display text-lg font-extrabold text-white drop-shadow">
+          {design.name}
+        </span>
       </div>
     </div>
   );
@@ -36,6 +47,7 @@ export function DesignStep() {
   const { state, dispatch } = useConfigurator();
   const { designs } = useStorefront();
   const keepingChoices = state.returnToFinalPreview;
+  const isMock = isJustPrintMockMode();
 
   const visibleDesigns = state.bike
     ? designs.filter((design) => {
@@ -45,6 +57,53 @@ export function DesignStep() {
         return design.compatibleBikeIds.includes(state.bike!.id);
       })
     : designs;
+
+  const applyDesignDefaults = (design: StorefrontDesign) => {
+    const slots = resolveDesignColorSlots(
+      design,
+      state.bike?.colorSlots ?? null,
+    );
+
+    if (slots.length > 0) {
+      dispatch({
+        type: "APPLY_DESIGN_PALETTE",
+        payload: buildPaletteFromSlots(slots),
+      });
+      const plate = resolvePlateFromSlots(slots);
+      if (plate) {
+        dispatch({ type: "SET_PLATE_SELECTION", payload: plate });
+      }
+      return;
+    }
+
+    // Mock-only fallback when a design has no slots.
+    if (isMock) {
+      dispatch({
+        type: "APPLY_DESIGN_PALETTE",
+        payload: [
+          {
+            ...DEFAULT_PALETTE[0]!,
+            hex: design.accentColors[0],
+            label: "Couleur 1",
+            name: "Couleur 1",
+          },
+          {
+            ...DEFAULT_PALETTE[1]!,
+            hex: design.accentColors[1],
+            label: "Couleur 2",
+            name: "Couleur 2",
+          },
+          {
+            ...DEFAULT_PALETTE[2]!,
+            hex: design.accentColors[2],
+            label: "Couleur 3",
+            name: "Couleur 3",
+          },
+          { ...DEFAULT_PALETTE[3]! },
+        ],
+      });
+    }
+  };
 
   return (
     <div className="flex flex-col gap-5">
@@ -59,68 +118,46 @@ export function DesignStep() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 min-[430px]:grid-cols-2">
-        {visibleDesigns.map((design) => (
-          <SelectionCard
-            key={design.id}
-            title={design.name}
-            description={design.description}
-            badge={design.badge}
-            hideTitle
-            compactFooter
-            mediaAspectClassName="aspect-[4/3]"
-            selected={state.selectedDesign === design.id}
-            onSelect={() => {
-              dispatch({ type: "SET_DESIGN", payload: design.id });
+      {visibleDesigns.length === 0 ? (
+        <p className="text-sm text-[var(--rm-text-muted)]">
+          Aucun design disponible pour cette moto.
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 min-[430px]:grid-cols-2">
+          {visibleDesigns.map((design) => (
+            <SelectionCard
+              key={design.id}
+              title={design.name}
+              description={design.description}
+              badge={design.badge}
+              hideTitle
+              compactFooter
+              mediaAspectClassName="aspect-[4/3]"
+              selected={
+                state.selectedDesign === design.id ||
+                state.selectedDesign === design.storefrontId
+              }
+              onSelect={() => {
+                // Always select the internal UUID when available.
+                dispatch({ type: "SET_DESIGN", payload: design.id });
 
-              // Keep existing colors when switching design from the final preview.
-              if (!keepingChoices) {
-                const slots = state.bike?.colorSlots?.filter((s) => !s.isPlate);
-                if (slots && slots.length > 0) {
-                  dispatch({
-                    type: "APPLY_DESIGN_PALETTE",
-                    payload: slots.map((slot, index) => ({
-                      id: slot.key,
-                      label: slot.label || `Couleur ${index + 1}`,
-                      hex: slot.defaultHex,
-                    })),
-                  });
-                  const plate = state.bike?.colorSlots?.find((s) => s.isPlate);
-                  if (plate) {
-                    dispatch({
-                      type: "SET_PLATE_COLOR",
-                      payload: plate.defaultHex,
-                    });
-                  }
-                } else {
-                  dispatch({
-                    type: "APPLY_DESIGN_PALETTE",
-                    payload: [
-                      {
-                        ...DEFAULT_PALETTE[0],
-                        hex: design.accentColors[0],
-                        label: "Couleur 1",
-                      },
-                      {
-                        ...DEFAULT_PALETTE[1],
-                        hex: design.accentColors[1],
-                        label: "Couleur 2",
-                      },
-                      {
-                        ...DEFAULT_PALETTE[2],
-                        hex: design.accentColors[2],
-                        label: "Couleur 3",
-                      },
-                      DEFAULT_PALETTE[3],
-                    ],
+                if (process.env.NODE_ENV === "development") {
+                  console.info("[storefront/design]", {
+                    designId: design.id,
+                    storefrontId: design.storefrontId ?? null,
+                    slots: design.colorSlots?.length ?? 0,
                   });
                 }
-              }
-            }}
-            media={<DesignPlaceholder colors={design.accentColors} />}
-          />
-        ))}
-      </div>
+
+                if (!keepingChoices) {
+                  applyDesignDefaults(design);
+                }
+              }}
+              media={<DesignThumbnail design={design} />}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

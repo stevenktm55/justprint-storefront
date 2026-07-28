@@ -159,7 +159,7 @@ describe("migrateDraft / draft schema validation", () => {
     expect(result.state.savedDesignId).toBeNull();
     expect(result.state.publicId).toBeNull();
     expect(result.state.editToken).toBeNull();
-    expect(result.state.draftSchemaVersion).toBe(3);
+    expect(result.state.draftSchemaVersion).toBe(CURRENT_DRAFT_SCHEMA_VERSION);
     expect(hasValidServerConfiguration(result.state)).toBe(false);
   });
 
