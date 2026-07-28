@@ -13,31 +13,12 @@ import {
   resolveDesignColorSlots,
   selectionToPaletteColor,
 } from "@/lib/justprint/colors";
-import { isJustPrintMockMode } from "@/lib/justprint-client";
 import type { PaletteColor } from "@/types/configurator";
 import type {
   StorefrontColorLibrary,
   StorefrontColorSlot,
   StorefrontLibraryColor,
 } from "@/types/justprint";
-
-/** Palette mock locale — uniquement si le bootstrap mock n’a pas de bibliothèque. */
-const MOCK_FALLBACK_LIBRARY: StorefrontColorLibrary = {
-  id: "mock-local",
-  name: "Couleurs RawMoto",
-  shopId: "rawmoto",
-  active: true,
-  colors: [
-    { id: "c01", name: "Orange Raw", hex: "#FF5A00", displayOrder: 0, cmyk: { c: 0, m: 72, y: 100, k: 0 }, rgb: { r: 255, g: 90, b: 0 } },
-    { id: "c02", name: "Noir Mat", hex: "#111111", displayOrder: 1, cmyk: { c: 0, m: 0, y: 0, k: 93 }, rgb: { r: 17, g: 17, b: 17 } },
-    { id: "c03", name: "Blanc Pur", hex: "#FFFFFF", displayOrder: 2, cmyk: { c: 0, m: 0, y: 0, k: 0 }, rgb: { r: 255, g: 255, b: 255 } },
-    { id: "c04", name: "Bleu Racing", hex: "#0066FF", displayOrder: 3, cmyk: { c: 100, m: 60, y: 0, k: 0 }, rgb: { r: 0, g: 102, b: 255 } },
-    { id: "c05", name: "Rouge Factory", hex: "#E10600", displayOrder: 4, cmyk: { c: 0, m: 97, y: 100, k: 12 }, rgb: { r: 225, g: 6, b: 0 } },
-    { id: "c06", name: "Jaune Fluo", hex: "#F5E000", displayOrder: 5, cmyk: { c: 4, m: 0, y: 100, k: 4 }, rgb: { r: 245, g: 224, b: 0 } },
-    { id: "c07", name: "Vert Neon", hex: "#39FF14", displayOrder: 6, cmyk: { c: 55, m: 0, y: 92, k: 0 }, rgb: { r: 57, g: 255, b: 20 } },
-    { id: "c08", name: "Gris Acier", hex: "#6B7280", displayOrder: 7, cmyk: { c: 16, m: 10, y: 0, k: 50 }, rgb: { r: 107, g: 114, b: 128 } },
-  ],
-};
 
 export function PersonalizationStep() {
   const { state, dispatch } = useConfigurator();
@@ -55,13 +36,8 @@ export function PersonalizationStep() {
   );
 
   const libraries = useMemo(() => {
-    const fromBootstrap =
-      colorLibraries.length > 0
-        ? colorLibraries
-        : getCatalogColorLibraries();
-    if (fromBootstrap.length > 0) return fromBootstrap;
-    if (isJustPrintMockMode()) return [MOCK_FALLBACK_LIBRARY];
-    return [];
+    if (colorLibraries.length > 0) return colorLibraries;
+    return getCatalogColorLibraries();
   }, [colorLibraries]);
 
   const togglePicker = (id: string) => {
