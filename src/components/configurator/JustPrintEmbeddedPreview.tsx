@@ -71,14 +71,19 @@ function deriveUiStatus(args: {
   syncStatus: string;
   iframeReady: boolean;
   iframeError: string | null;
+  engineMode: EmbeddedPreviewEngineMode;
 }): EmbeddedPreviewUiStatus {
   if (args.kind === "unsupported") return "unsupported";
-  if (args.kind === "preparing" || args.kind === "mock_local") {
-    return args.kind === "preparing" ? "preparing" : "ready";
-  }
+  if (args.kind === "preparing") return "preparing";
+  if (args.kind === "mock_local") return "ready";
   if (args.iframeError) return "error";
   if (args.syncStatus === "saving" || args.syncStatus === "creating") {
     return "updating";
+  }
+  // Lite strip has no iframe — treat a successful sync as up to date.
+  if (args.engineMode === "lite") {
+    if (args.syncStatus === "error") return "error";
+    return "ready";
   }
   if (args.iframeReady) return "ready";
   return "loading";
@@ -200,6 +205,7 @@ export function JustPrintEmbeddedPreview({
     syncStatus,
     iframeReady,
     iframeError,
+    engineMode,
   });
 
   const useRemoteIframe =
