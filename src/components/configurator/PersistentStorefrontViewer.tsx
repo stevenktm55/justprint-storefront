@@ -168,17 +168,19 @@ export function PersistentStorefrontViewer() {
 
   // Sync compact container to the layout anchor (no DOM move / no portal).
   useLayoutEffect(() => {
-    if (!active || viewerDisplayMode !== "compact" || !hasAnchor) {
+    if (!active || !hasAnchor) {
       const clearId = requestAnimationFrame(() => setAnchorBox(null));
       return () => cancelAnimationFrame(clearId);
     }
 
+    // Keep last known box while fullscreen so compact restores instantly.
+    if (viewerDisplayMode !== "compact") {
+      return;
+    }
+
     const sync = () => {
       const el = anchorRef.current;
-      if (!el) {
-        setAnchorBox(null);
-        return;
-      }
+      if (!el) return;
       const rect = el.getBoundingClientRect();
       setAnchorBox({
         top: rect.top,
