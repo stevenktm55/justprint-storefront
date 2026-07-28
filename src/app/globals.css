@@ -26,6 +26,8 @@
   --rm-max-width: 1120px;
   --rm-touch: 44px;
   --rm-shadow: 0 1px 2px rgba(10, 10, 10, 0.04);
+  --storefront-sticky-top: 0px;
+  --viewer-compact-height: clamp(240px, 34dvh, 285px);
   --background: var(--rm-bg);
   --foreground: var(--rm-text);
 }
@@ -180,4 +182,76 @@ textarea {
 
 .rm-checking {
   animation: rm-check-pulse 1s ease-in-out infinite;
+}
+
+/* Persistent 3D viewer — explicit mode resets (do not rely on class absence). */
+.viewer-persistent {
+  overflow: hidden;
+  background: #e9e9e6;
+}
+
+.viewer-persistent[data-display-mode="background"] {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  right: auto;
+  bottom: auto;
+  width: 320px;
+  height: 220px;
+  min-height: 220px;
+  opacity: 0;
+  visibility: hidden;
+  transform: none;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.viewer-persistent[data-display-mode="compact"] {
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  /* Clicks go to the layout slot; Agrandir keeps pointer-events:auto. */
+  pointer-events: none;
+  z-index: 35;
+  border-radius: 12px;
+}
+
+.viewer-persistent[data-display-mode="full"] {
+  position: fixed;
+  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100dvh;
+  min-height: 100dvh;
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  pointer-events: auto;
+  z-index: 90;
+  border-radius: 0;
+}
+
+.viewer-compact-slot {
+  position: sticky;
+  top: var(--storefront-sticky-top);
+  z-index: 30;
+  width: 100%;
+}
+
+.viewer-compact {
+  width: 100%;
+  height: var(--viewer-compact-height);
+  min-height: 240px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #e9e9e6;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
 }

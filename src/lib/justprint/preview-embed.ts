@@ -1,5 +1,6 @@
 import { getJustPrintEnvironment } from "@/lib/justprint/environment";
-import type { PreviewMode } from "@/types/configurator";
+import type { ConfiguratorStep, PreviewMode } from "@/types/configurator";
+import type { StorefrontViewerDisplayMode } from "@/types/justprint";
 
 /** Cas pilote remote — seul combo avec moteur JustPrint embarqué pour l’instant. */
 export const REMOTE_PILOT_BIKE_ID = "yamaha-450-yzf-2025";
@@ -122,4 +123,24 @@ export function shouldUsePersistent3dViewer(args: {
   previewMode: PreviewMode;
 }): boolean {
   return !args.isMockMode && args.previewMode === "3d";
+}
+
+/**
+ * Mode d’affichage unique du viewer persistant.
+ * Moto / Design → background (préchargement hors écran).
+ * Personnalisation / Logos / Finale → compact (ancre layout).
+ * Agrandir (`isExpanded`) → full overlay, quelle que soit l’étape.
+ */
+export function getViewerDisplayMode(args: {
+  currentStep: ConfiguratorStep;
+  isExpanded: boolean;
+  active: boolean;
+  hasAnchor: boolean;
+}): StorefrontViewerDisplayMode {
+  if (!args.active) return "background";
+  if (args.isExpanded) return "full";
+  if (args.currentStep >= 3 && args.currentStep <= 5 && args.hasAnchor) {
+    return "compact";
+  }
+  return "background";
 }

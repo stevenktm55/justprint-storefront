@@ -21,7 +21,7 @@ interface StickyMobilePreviewProps {
 /**
  * Vignette sticky (Personnalisation → Logos).
  * Invisible aux étapes Moto / Design — le viewer précharge en mode background.
- * En 3D remote : chrome + ancre pour le viewer persistant (pas d’iframe ici).
+ * En 3D remote : ancre layout pour le viewer persistant (pas d’iframe ici).
  * En mock / 2D : JustPrintEmbeddedPreview local ou embed legacy.
  */
 export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
@@ -66,22 +66,54 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
   const statusHint =
     viewerStatus === "ready" || viewerStatus === "model-ready"
       ? "Aperçu prêt"
-      : "Préparation de la moto…";
+      : "Préparation de ton aperçu…";
+
+  // Persistent 3D — layout slot only; the single iframe lives in PersistentStorefrontViewer.
+  if (persistent3d) {
+    return (
+      <div className="viewer-compact-slot shrink-0 border-b border-[var(--rm-border)]">
+        <div className="px-4 pb-2 pt-2">
+          <div
+            className="viewer-compact relative w-full"
+            role="button"
+            tabIndex={0}
+            aria-label="Agrandir l’aperçu 3D"
+            onClick={expandViewer}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                expandViewer();
+              }
+            }}
+          >
+            <ViewerAnchor
+              className="h-full w-full"
+              label="Aperçu 3D compact"
+            />
+            {isExpanded ? (
+              <div className="pointer-events-none absolute inset-0 z-[1] flex flex-col items-center justify-center gap-1 bg-[#e9e9e6] text-xs text-[var(--rm-text-muted)]">
+                <span>Aperçu agrandi</span>
+                <span className="text-[10px]">{statusHint}</span>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
       <div className="sticky top-0 z-30 shrink-0 border-b border-[var(--rm-border)] bg-[var(--rm-bg)]">
         <div className="relative z-40 flex items-center justify-between gap-2 px-4 pt-2">
           <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--rm-text-muted)]">
-            {persistent3d ? "Ton aperçu 3D" : `Aperçu live · ${mode === "3d" ? "3D" : "2D"}`}
+            {`Aperçu live · ${mode === "3d" ? "3D" : "2D"}`}
           </p>
           <div className="flex items-center gap-1">
             {!collapsed ? (
               <button
                 type="button"
-                onClick={() =>
-                  persistent3d ? expandViewer() : setLegacyExpanded(true)
-                }
+                onClick={() => setLegacyExpanded(true)}
                 className="inline-flex h-9 items-center gap-1 rounded-[var(--rm-radius-sm)] px-2 text-[11px] font-semibold text-[var(--rm-text-muted)]"
                 aria-label="Agrandir l’aperçu"
               >
@@ -104,20 +136,7 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
         {!collapsed ? (
           <div className="px-4 pb-2 pt-1">
             <div className="relative h-[140px] overflow-hidden rounded-[var(--rm-radius-sm)] border border-[var(--rm-border)] bg-[var(--rm-surface)] sm:h-[150px]">
-              {persistent3d ? (
-                <>
-                  <ViewerAnchor
-                    className="h-full w-full"
-                    label="Aperçu 3D compact"
-                  />
-                  {isExpanded ? (
-                    <div className="pointer-events-none absolute inset-0 z-[1] flex flex-col items-center justify-center gap-1 bg-[var(--rm-surface)] text-xs text-[var(--rm-text-muted)]">
-                      <span>Aperçu agrandi</span>
-                      <span className="text-[10px]">{statusHint}</span>
-                    </div>
-                  ) : null}
-                </>
-              ) : !legacyExpanded ? (
+              {!legacyExpanded ? (
                 <JustPrintEmbeddedPreview
                   configurationId={state.savedDesignId}
                   previewMode={mode}
@@ -154,7 +173,7 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
         )}
       </div>
 
-      {!persistent3d && legacyExpanded ? (
+      {legacyExpanded ? (
         <div className="fixed inset-0 z-[90] flex h-[100dvh] flex-col bg-[var(--rm-bg)]">
           <div className="flex items-center justify-between gap-2 border-b border-[var(--rm-border)] px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
             <p className="text-sm font-bold uppercase tracking-wide">

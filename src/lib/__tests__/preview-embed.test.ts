@@ -4,6 +4,7 @@ import {
   REMOTE_PILOT_DESIGN_ID,
   buildStorefrontPreviewEmbedUrl,
   buildStorefrontViewerEmbedUrl,
+  getViewerDisplayMode,
   isRemotePilot3dSupported,
   resolveRemotePreviewKind,
   shouldUsePersistent3dViewer,
@@ -100,6 +101,73 @@ describe("resolveRemotePreviewKind", () => {
         savedDesignId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
       }),
     ).toBe("remote_2d");
+  });
+});
+
+describe("getViewerDisplayMode", () => {
+  const base = {
+    active: true,
+    hasAnchor: true,
+    isExpanded: false,
+  } as const;
+
+  it("keeps background on moto and design steps", () => {
+    expect(
+      getViewerDisplayMode({ ...base, currentStep: 1 }),
+    ).toBe("background");
+    expect(
+      getViewerDisplayMode({ ...base, currentStep: 2 }),
+    ).toBe("background");
+  });
+
+  it("uses compact on personalization, logos, and final when anchored", () => {
+    expect(
+      getViewerDisplayMode({ ...base, currentStep: 3 }),
+    ).toBe("compact");
+    expect(
+      getViewerDisplayMode({ ...base, currentStep: 4 }),
+    ).toBe("compact");
+    expect(
+      getViewerDisplayMode({ ...base, currentStep: 5 }),
+    ).toBe("compact");
+  });
+
+  it("stays background without an anchor even on later steps", () => {
+    expect(
+      getViewerDisplayMode({
+        ...base,
+        currentStep: 3,
+        hasAnchor: false,
+      }),
+    ).toBe("background");
+  });
+
+  it("forces full overlay when expanded", () => {
+    expect(
+      getViewerDisplayMode({
+        ...base,
+        currentStep: 3,
+        isExpanded: true,
+      }),
+    ).toBe("full");
+    expect(
+      getViewerDisplayMode({
+        ...base,
+        currentStep: 1,
+        isExpanded: true,
+      }),
+    ).toBe("full");
+  });
+
+  it("stays background when viewer is inactive", () => {
+    expect(
+      getViewerDisplayMode({
+        ...base,
+        currentStep: 3,
+        active: false,
+        isExpanded: true,
+      }),
+    ).toBe("background");
   });
 });
 

@@ -8,7 +8,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import { X } from "lucide-react";
+import { Maximize2, X } from "lucide-react";
 import { useConfigurator } from "@/context/ConfiguratorContext";
 import { usePersistentStorefrontViewer } from "@/context/PersistentStorefrontViewerContext";
 import { useStorefront } from "@/context/StorefrontContext";
@@ -19,6 +19,7 @@ import {
 } from "@/lib/justprint-client";
 import {
   buildStorefrontViewerEmbedUrl,
+  getViewerDisplayMode,
   shouldUsePersistent3dViewer,
 } from "@/lib/justprint/preview-embed";
 import type {
@@ -53,19 +54,8 @@ function statusLabel(status: StorefrontViewerStatus): string {
     case "error":
       return "Impossible de charger l’aperçu 3D";
     default:
-      return "Préparation de la moto…";
+      return "Préparation de ton aperçu…";
   }
-}
-
-function deriveDisplayMode(args: {
-  active: boolean;
-  isExpanded: boolean;
-  hasAnchor: boolean;
-}): StorefrontViewerDisplayMode {
-  if (!args.active) return "background";
-  if (args.isExpanded) return "full";
-  if (args.hasAnchor) return "compact";
-  return "background";
 }
 
 interface AnchorBox {
@@ -73,6 +63,61 @@ interface AnchorBox {
   left: number;
   width: number;
   height: number;
+}
+
+function buildCompactStyle(box: AnchorBox): CSSProperties {
+  return {
+    top: box.top,
+    left: box.left,
+    width: Math.max(box.width, 1),
+    height: Math.max(box.height, 1),
+    minHeight: Math.max(box.height, 1),
+    // Explicit resets out of background mode — do not rely on class absence.
+    right: "auto",
+    bottom: "auto",
+    opacity: 1,
+    visibility: "visible",
+    transform: "none",
+    pointerEvents: "none",
+    zIndex: 35,
+  };
+}
+
+function buildBackgroundStyle(): CSSProperties {
+  return {
+    position: "fixed",
+    top: 0,
+    left: -10000,
+    right: "auto",
+    bottom: "auto",
+    width: 320,
+    height: 220,
+    minHeight: 220,
+    opacity: 0,
+    visibility: "hidden",
+    transform: "none",
+    pointerEvents: "none",
+    zIndex: 0,
+  };
+}
+
+function buildFullStyle(): CSSProperties {
+  return {
+    position: "fixed",
+    inset: 0,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: "100%",
+    height: "100dvh",
+    minHeight: "100dvh",
+    opacity: 1,
+    visibility: "visible",
+    transform: "none",
+    pointerEvents: "auto",
+    zIndex: 90,
+  };
 }
 
 /**
@@ -108,6 +153,7 @@ export function PersistentStorefrontViewer() {
   );
   const preloadStartedAtRef = useRef<number | null>(null);
   const [anchorBox, setAnchorBox] = useState<AnchorBox | null>(null);
+  const [lastCompactBox, setLastCompactBox] = useState<AnchorBox | null>(null);
   const [sessionSrc, setSessionSrc] = useState<string | null>(null);
   const [iframeReadyForMessages, setIframeReadyForMessages] = useState(false);
 
@@ -123,9 +169,10 @@ export function PersistentStorefrontViewer() {
       ? buildStorefrontViewerEmbedUrl({ shopId, bikeId })
       : null;
 
-  const viewerDisplayMode = deriveDisplayMode({
-    active,
+  const viewerDisplayMode = getViewerDisplayMode({
+    currentStep: state.currentStep,
     isExpanded,
+    active,
     hasAnchor,
   });
 
@@ -169,8 +216,7 @@ export function PersistentStorefrontViewer() {
   // Sync compact container to the layout anchor (no DOM move / no portal).
   useLayoutEffect(() => {
     if (!active || !hasAnchor) {
-      const clearId = requestAnimationFrame(() => setAnchorBox(null));
-      return () => cancelAnimationFrame(clearId);
+      return;
     }
 
     // Keep last known box while fullscreen so compact restores instantly.
@@ -182,15 +228,19 @@ export function PersistentStorefrontViewer() {
       const el = anchorRef.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
-      setAnchorBox({
+      const next: AnchorBox = {
         top: rect.top,
         left: rect.left,
         width: rect.width,
         height: rect.height,
-      });
+      };
+      setAnchorBox(next);
+      setLastCompactBox(next);
     };
 
-    const startId = requestAnimationFrame(sync);
+    // Measure synchronously so the first compact paint is not off-screen.
+    sync();
+
     const el = anchorRef.current;
     const ro =
       typeof ResizeObserver !== "undefined" && el
@@ -202,7 +252,6 @@ export function PersistentStorefrontViewer() {
     window.addEventListener("scroll", sync, true);
     window.addEventListener("resize", sync);
     return () => {
-      cancelAnimationFrame(startId);
       ro?.disconnect();
       window.removeEventListener("scroll", sync, true);
       window.removeEventListener("resize", sync);
@@ -233,20 +282,49 @@ export function PersistentStorefrontViewer() {
     [],
   );
 
-  // SET_DISPLAY_MODE after container geometry updates.
+  const notifyDisplayMode = useCallback(
+    (mode: StorefrontViewerDisplayMode) => {
+      postToViewer({
+        type: "JUSTPRINT_SET_DISPLAY_MODE",
+        mode,
+      });
+      lastPostedDisplayModeRef.current = mode;
+      // Help JustPrint re-read real container dimensions after CSS settle.
+      try {
+        iframeRef.current?.contentWindow?.dispatchEvent(new Event("resize"));
+      } catch {
+        // Cross-origin may block — postMessage mode change is enough.
+      }
+    },
+    [postToViewer],
+  );
+
+  // SET_DISPLAY_MODE after container geometry updates (double rAF).
   useEffect(() => {
     if (!src || !iframeReadyForMessages) return;
     if (lastPostedDisplayModeRef.current === viewerDisplayMode) return;
 
-    const frame = requestAnimationFrame(() => {
-      postToViewer({
-        type: "JUSTPRINT_SET_DISPLAY_MODE",
-        mode: viewerDisplayMode,
+    let cancelled = false;
+    let innerId = 0;
+    const outerId = requestAnimationFrame(() => {
+      innerId = requestAnimationFrame(() => {
+        if (cancelled) return;
+        notifyDisplayMode(viewerDisplayMode);
       });
-      lastPostedDisplayModeRef.current = viewerDisplayMode;
     });
-    return () => cancelAnimationFrame(frame);
-  }, [src, iframeReadyForMessages, viewerDisplayMode, postToViewer, anchorBox]);
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(outerId);
+      cancelAnimationFrame(innerId);
+    };
+  }, [
+    src,
+    iframeReadyForMessages,
+    viewerDisplayMode,
+    notifyDisplayMode,
+    anchorBox,
+  ]);
 
   // LOAD / REFRESH saved design — never change iframe src.
   useEffect(() => {
@@ -319,11 +397,12 @@ export function PersistentStorefrontViewer() {
         case "JUSTPRINT_MODEL_PRELOADED":
           setViewerStatus("model-ready");
           setViewerError(null);
-          if (IS_DEV && preloadStartedAtRef.current != null) {
+          if (IS_DEV) {
             console.info(
-              "[PersistentStorefrontViewer] model preloaded in",
-              Math.round(performance.now() - preloadStartedAtRef.current),
-              "ms",
+              "[PersistentStorefrontViewer] MODEL_PRELOADED",
+              preloadStartedAtRef.current != null
+                ? `${Math.round(performance.now() - preloadStartedAtRef.current)}ms`
+                : "",
             );
           }
           break;
@@ -334,6 +413,9 @@ export function PersistentStorefrontViewer() {
         case "JUSTPRINT_PREVIEW_UPDATED":
           setViewerStatus("ready");
           setViewerError(null);
+          if (IS_DEV && msg.type === "JUSTPRINT_PREVIEW_READY") {
+            console.info("[PersistentStorefrontViewer] PREVIEW_READY");
+          }
           break;
         case "JUSTPRINT_PREVIEW_ERROR":
           setViewerStatus("error");
@@ -346,10 +428,34 @@ export function PersistentStorefrontViewer() {
     return () => window.removeEventListener("message", onMessage);
   }, [src, setViewerStatus, setViewerError]);
 
+  // Dev instrumentation — dimensions + mount/src counters.
   useEffect(() => {
-    if (!IS_DEV) return;
-    console.info("[PersistentStorefrontViewer] metrics", metrics);
-  }, [metrics]);
+    if (!IS_DEV || !src) return;
+    const container = document.querySelector(
+      "[data-persistent-storefront-viewer]",
+    );
+    const iframe = iframeRef.current;
+    const cRect = container?.getBoundingClientRect();
+    const iRect = iframe?.getBoundingClientRect();
+    console.info("[PersistentStorefrontViewer] display", {
+      displayMode: viewerDisplayMode,
+      currentStep: state.currentStep,
+      container: cRect
+        ? { w: Math.round(cRect.width), h: Math.round(cRect.height) }
+        : null,
+      iframe: iRect
+        ? { w: Math.round(iRect.width), h: Math.round(iRect.height) }
+        : null,
+      metrics,
+    });
+  }, [
+    src,
+    viewerDisplayMode,
+    state.currentStep,
+    anchorBox,
+    metrics,
+    viewerStatus,
+  ]);
 
   if (!src) return null;
 
@@ -358,47 +464,40 @@ export function PersistentStorefrontViewer() {
     viewerStatus === "preloading" ||
     viewerStatus === "applying-design";
 
-  const containerStyle: CSSProperties =
-    viewerDisplayMode === "full"
-      ? {
-          position: "fixed",
-          inset: 0,
-          zIndex: 90,
-          width: "100%",
-          height: "100dvh",
-          opacity: 1,
-          pointerEvents: "auto",
-        }
-      : viewerDisplayMode === "compact" && anchorBox
-        ? {
-            position: "fixed",
-            top: anchorBox.top,
-            left: anchorBox.left,
-            width: Math.max(anchorBox.width, 1),
-            height: Math.max(anchorBox.height, 1),
-            // Below sticky chrome (z-30/40) so Agrandir stays clickable.
-            zIndex: 20,
-            opacity: 1,
-            pointerEvents: "auto",
-          }
-        : {
-            // background — valid size, off-screen, never display:none / 0×0
-            position: "fixed",
-            top: 0,
-            left: -10000,
-            width: 320,
-            height: 220,
-            zIndex: 0,
-            opacity: 0,
-            pointerEvents: "none",
-          };
+  const compactBox = anchorBox ?? lastCompactBox;
+
+  let containerStyle: CSSProperties;
+  if (viewerDisplayMode === "full") {
+    containerStyle = buildFullStyle();
+  } else if (viewerDisplayMode === "compact" && compactBox) {
+    containerStyle = buildCompactStyle(compactBox);
+  } else if (viewerDisplayMode === "compact") {
+    // Compact requested but box not measured yet — never fall back to off-screen.
+    containerStyle = {
+      position: "fixed",
+      top: 0,
+      left: 0,
+      right: "auto",
+      bottom: "auto",
+      width: "100%",
+      height: "var(--viewer-compact-height)",
+      minHeight: 240,
+      opacity: 0,
+      visibility: "hidden",
+      transform: "none",
+      pointerEvents: "none",
+      zIndex: 35,
+    };
+  } else {
+    containerStyle = buildBackgroundStyle();
+  }
 
   return (
     <div
       data-persistent-storefront-viewer=""
       data-display-mode={viewerDisplayMode}
       data-viewer-status={viewerStatus}
-      className="overflow-hidden bg-[var(--rm-surface)]"
+      className="viewer-persistent"
       style={containerStyle}
     >
       {viewerDisplayMode === "full" ? (
@@ -433,34 +532,34 @@ export function PersistentStorefrontViewer() {
           onLoad={() => {
             setIframeReadyForMessages(true);
             requestAnimationFrame(() => {
-              postToViewer({
-                type: "JUSTPRINT_SET_DISPLAY_MODE",
-                mode: viewerDisplayMode,
+              requestAnimationFrame(() => {
+                notifyDisplayMode(viewerDisplayMode);
               });
-              lastPostedDisplayModeRef.current = viewerDisplayMode;
             });
           }}
         />
 
         {viewerDisplayMode === "compact" ? (
-          <button
-            type="button"
-            className="absolute inset-0 z-[1] cursor-pointer bg-transparent"
-            aria-label="Agrandir l’aperçu 3D"
-            onClick={expandViewer}
-          />
+          <>
+            <button
+              type="button"
+              className="pointer-events-auto absolute right-2 top-2 z-[3] inline-flex h-8 items-center gap-1 rounded-[var(--rm-radius-sm)] bg-black/55 px-2 text-[11px] font-semibold text-white"
+              aria-label="Agrandir l’aperçu 3D"
+              onClick={expandViewer}
+            >
+              <Maximize2 size={14} />
+              Agrandir
+            </button>
+            <p className="pointer-events-none absolute inset-x-0 bottom-2 z-[2] text-center text-[10px] font-medium text-white/80 drop-shadow">
+              Appuie pour agrandir
+            </p>
+          </>
         ) : null}
 
         {showPreparingOverlay ? (
-          <div className="pointer-events-none absolute inset-0 z-[2] flex items-center justify-center bg-[var(--rm-surface)]/70 text-xs text-[var(--rm-text-muted)]">
+          <div className="pointer-events-none absolute inset-0 z-[2] flex items-center justify-center bg-[#e9e9e6]/80 text-xs text-[var(--rm-text-muted)]">
             {statusLabel(viewerStatus)}
           </div>
-        ) : null}
-
-        {viewerStatus === "ready" || viewerStatus === "model-ready" ? (
-          <p className="pointer-events-none absolute bottom-1.5 right-1.5 z-[2] rounded bg-black/55 px-2 py-0.5 text-[10px] font-medium text-white">
-            {statusLabel(viewerStatus)}
-          </p>
         ) : null}
 
         {viewerStatus === "error" ? (
@@ -472,8 +571,8 @@ export function PersistentStorefrontViewer() {
 
       {IS_DEV ? (
         <div className="pointer-events-none absolute left-1 top-1 z-[3] rounded bg-black/70 px-1.5 py-0.5 font-mono text-[9px] text-white">
-          m:{metrics.iframeMounts} src:{metrics.srcChanges} load:
-          {metrics.loadSavedDesignMessages} full:{metrics.fullOpens}
+          {viewerDisplayMode} m:{metrics.iframeMounts} src:{metrics.srcChanges}{" "}
+          load:{metrics.loadSavedDesignMessages} full:{metrics.fullOpens}
         </div>
       ) : null}
     </div>
