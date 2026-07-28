@@ -372,9 +372,10 @@ export function PersistentStorefrontViewer() {
             position: "fixed",
             top: anchorBox.top,
             left: anchorBox.left,
-            width: anchorBox.width,
-            height: anchorBox.height,
-            zIndex: 25,
+            width: Math.max(anchorBox.width, 1),
+            height: Math.max(anchorBox.height, 1),
+            // Below sticky chrome (z-30/40) so Agrandir stays clickable.
+            zIndex: 20,
             opacity: 1,
             pointerEvents: "auto",
           }

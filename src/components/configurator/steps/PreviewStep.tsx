@@ -143,18 +143,14 @@ export function PreviewStep({
 
       <div className="relative">
         {persistent3d ? (
-          <div className="h-[min(52vh,420px)] min-h-[240px] overflow-hidden rounded-[var(--rm-radius)] border border-[var(--rm-border)] bg-[var(--rm-surface)]">
+          <div className="relative h-[min(52vh,420px)] min-h-[240px] overflow-hidden rounded-[var(--rm-radius)] border border-[var(--rm-border)] bg-[var(--rm-surface)]">
+            <ViewerAnchor className="h-full w-full" label="Aperçu 3D final" />
             {isExpanded ? (
-              <div className="flex h-full flex-col items-center justify-center gap-1 text-xs text-[var(--rm-text-muted)]">
+              <div className="pointer-events-none absolute inset-0 z-[1] flex flex-col items-center justify-center gap-1 bg-[var(--rm-surface)] text-xs text-[var(--rm-text-muted)]">
                 <span>Aperçu agrandi</span>
                 <span className="text-[10px]">{statusHint}</span>
               </div>
-            ) : (
-              <ViewerAnchor
-                className="h-full w-full"
-                label="Aperçu 3D final"
-              />
-            )}
+            ) : null}
           </div>
         ) : !previewExpanded ? (
           <JustPrintEmbeddedPreview

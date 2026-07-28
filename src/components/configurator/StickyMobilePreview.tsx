@@ -69,8 +69,8 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
 
   return (
     <>
-      <div className="sticky top-0 z-20 shrink-0 border-b border-[var(--rm-border)] bg-[var(--rm-bg)]">
-        <div className="flex items-center justify-between gap-2 px-4 pt-2">
+      <div className="sticky top-0 z-30 shrink-0 border-b border-[var(--rm-border)] bg-[var(--rm-bg)]">
+        <div className="relative z-40 flex items-center justify-between gap-2 px-4 pt-2">
           <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--rm-text-muted)]">
             {persistent3d ? "Ton aperçu 3D" : `Aperçu live · ${mode === "3d" ? "3D" : "2D"}`}
           </p>
@@ -102,16 +102,20 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
 
         {!collapsed ? (
           <div className="px-4 pb-2 pt-1">
-            <div className="h-[140px] overflow-hidden rounded-[var(--rm-radius-sm)] border border-[var(--rm-border)] bg-[var(--rm-surface)] sm:h-[150px]">
+            <div className="relative h-[140px] overflow-hidden rounded-[var(--rm-radius-sm)] border border-[var(--rm-border)] bg-[var(--rm-surface)] sm:h-[150px]">
               {persistent3d ? (
-                isExpanded ? (
-                  <div className="flex h-full flex-col items-center justify-center gap-1 text-xs text-[var(--rm-text-muted)]">
-                    <span>Aperçu agrandi</span>
-                    <span className="text-[10px]">{statusHint}</span>
-                  </div>
-                ) : (
-                  <ViewerAnchor className="h-full w-full" label="Aperçu 3D compact" />
-                )
+                <>
+                  <ViewerAnchor
+                    className="h-full w-full"
+                    label="Aperçu 3D compact"
+                  />
+                  {isExpanded ? (
+                    <div className="pointer-events-none absolute inset-0 z-[1] flex flex-col items-center justify-center gap-1 bg-[var(--rm-surface)] text-xs text-[var(--rm-text-muted)]">
+                      <span>Aperçu agrandi</span>
+                      <span className="text-[10px]">{statusHint}</span>
+                    </div>
+                  ) : null}
+                </>
               ) : !legacyExpanded ? (
                 <JustPrintEmbeddedPreview
                   configurationId={state.savedDesignId}

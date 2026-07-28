@@ -58,14 +58,13 @@ export function DesktopPreview() {
 
         {persistent3d ? (
           <div className="relative h-[320px] overflow-hidden rounded-[var(--rm-radius-sm)] border border-[var(--rm-border)] bg-[var(--rm-surface)]">
+            <ViewerAnchor className="h-full w-full" label="Aperçu 3D desktop" />
             {isExpanded ? (
-              <div className="flex h-full flex-col items-center justify-center gap-1 text-xs text-[var(--rm-text-muted)]">
+              <div className="pointer-events-none absolute inset-0 z-[1] flex flex-col items-center justify-center gap-1 bg-[var(--rm-surface)] text-xs text-[var(--rm-text-muted)]">
                 <span>Aperçu agrandi</span>
                 <span className="text-[10px]">{statusHint}</span>
               </div>
-            ) : (
-              <ViewerAnchor className="h-full w-full" label="Aperçu 3D desktop" />
-            )}
+            ) : null}
           </div>
         ) : (
           <JustPrintEmbeddedPreview
