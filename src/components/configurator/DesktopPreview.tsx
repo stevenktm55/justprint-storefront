@@ -6,6 +6,7 @@ import {
   getBikePreviewMode,
   previewModeHelpText,
 } from "@/lib/bike-preview";
+import { isJustPrintMockMode } from "@/lib/justprint-client";
 import type { PreviewView } from "@/types/configurator";
 
 const VIEWS: { id: PreviewView; label: string }[] = [
@@ -18,9 +19,10 @@ const VIEWS: { id: PreviewView; label: string }[] = [
 export function DesktopPreview() {
   const { state, dispatch } = useConfigurator();
   const mode = getBikePreviewMode(state.bike);
+  const remote = !isJustPrintMockMode();
 
   return (
-    <aside className="hidden lg:sticky lg:top-4 lg:block lg:self-start">
+    <aside className="lg:sticky lg:top-4 lg:self-start">
       <div className="rm-card p-4">
         <p className="mb-3 text-xs font-bold uppercase tracking-wide text-[var(--rm-text-muted)]">
           Prévisualisation
@@ -28,10 +30,13 @@ export function DesktopPreview() {
         <JustPrintEmbeddedPreview
           configurationId={state.savedDesignId}
           previewMode={mode}
+          engineMode="full"
           interactive={mode === "2d"}
         />
         <p className="mt-2 text-xs leading-relaxed text-[var(--rm-text-muted)]">
-          {previewModeHelpText(mode)}
+          {remote
+            ? "Aperçu JustPrint synchronisé avec ton saved_design (même source que le PDF)."
+            : previewModeHelpText(mode)}
         </p>
         {mode === "3d" ? (
           <div

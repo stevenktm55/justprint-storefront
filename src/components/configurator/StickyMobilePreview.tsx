@@ -5,12 +5,19 @@ import { ChevronDown, ChevronUp, Maximize2 } from "lucide-react";
 import { JustPrintEmbeddedPreview } from "@/components/configurator/JustPrintEmbeddedPreview";
 import { useConfigurator } from "@/context/ConfiguratorContext";
 import { getBikePreviewMode } from "@/lib/bike-preview";
+import { isJustPrintMockMode } from "@/lib/justprint-client";
+import { resolveRemotePreviewKind } from "@/lib/justprint/preview-embed";
 import type { ConfiguratorStep } from "@/types/configurator";
 
 interface StickyMobilePreviewProps {
   visible: boolean;
 }
 
+/**
+ * Vignette sticky (steps Personnalisation / Logos).
+ * En remote 3D : mode lite (pas de 2ᵉ moteur) + « Agrandir l’aperçu » pour
+ * monter l’unique iframe plein écran.
+ */
 export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
   const { state } = useConfigurator();
   const [collapsedByStep, setCollapsedByStep] = useState<
@@ -18,6 +25,19 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
   >({});
   const [expanded, setExpanded] = useState(false);
   const mode = getBikePreviewMode(state.bike);
+  const kind = resolveRemotePreviewKind({
+    isMockMode: isJustPrintMockMode(),
+    bikeId: state.bike?.id,
+    designId: state.selectedDesign,
+    previewMode: mode,
+    savedDesignId: state.savedDesignId,
+  });
+
+  const useLiteStrip =
+    !isJustPrintMockMode() &&
+    (kind === "remote_iframe" ||
+      kind === "remote_2d" ||
+      kind === "preparing");
 
   const collapsed = collapsedByStep[state.currentStep] ?? false;
 
@@ -32,18 +52,18 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
 
   return (
     <>
-      <div className="sticky top-0 z-20 shrink-0 border-b border-[var(--rm-border)] bg-[var(--rm-bg)] lg:hidden">
+      <div className="sticky top-0 z-20 shrink-0 border-b border-[var(--rm-border)] bg-[var(--rm-bg)]">
         <div className="flex items-center justify-between gap-2 px-4 pt-2">
           <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--rm-text-muted)]">
             Aperçu live · {mode === "3d" ? "3D" : "2D"}
           </p>
           <div className="flex items-center gap-1">
-            {mode === "2d" && !collapsed ? (
+            {!collapsed ? (
               <button
                 type="button"
                 onClick={() => setExpanded(true)}
                 className="inline-flex h-9 items-center gap-1 rounded-[var(--rm-radius-sm)] px-2 text-[11px] font-semibold text-[var(--rm-text-muted)]"
-                aria-label="Agrandir l’aperçu 2D"
+                aria-label="Agrandir l’aperçu"
               >
                 <Maximize2 size={14} />
                 Agrandir
@@ -64,14 +84,27 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
         {!collapsed ? (
           <div className="px-4 pb-2 pt-1">
             <div className="h-[188px] overflow-hidden rounded-[var(--rm-radius-sm)] border border-[var(--rm-border)] bg-[var(--rm-surface)] sm:h-[200px]">
-              <JustPrintEmbeddedPreview
-                configurationId={state.savedDesignId}
-                previewMode={mode}
-                fillHeight
-                showBadge={false}
-                compact={mode === "2d"}
-                className="h-full"
-              />
+              {/*
+                expanded → iframe plein écran uniquement (une instance 3D).
+                Sinon lite en remote, ou mock local compact.
+              */}
+              {!expanded ? (
+                <JustPrintEmbeddedPreview
+                  configurationId={state.savedDesignId}
+                  previewMode={mode}
+                  engineMode={useLiteStrip ? "lite" : "full"}
+                  fillHeight
+                  showBadge={false}
+                  showStatus={false}
+                  compact={mode === "2d"}
+                  className="h-full"
+                  onExpandRequest={() => setExpanded(true)}
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center text-xs text-[var(--rm-text-muted)]">
+                  Aperçu agrandi
+                </div>
+              )}
             </div>
           </div>
         ) : (
@@ -93,10 +126,10 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
       </div>
 
       {expanded ? (
-        <div className="fixed inset-0 z-[90] flex h-[100dvh] flex-col bg-[var(--rm-bg)] lg:hidden">
+        <div className="fixed inset-0 z-[90] flex h-[100dvh] flex-col bg-[var(--rm-bg)]">
           <div className="flex items-center justify-between gap-2 border-b border-[var(--rm-border)] px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
             <p className="text-sm font-bold uppercase tracking-wide">
-              Gabarit 2D
+              Aperçu {mode === "3d" ? "3D" : "2D"}
             </p>
             <button
               type="button"
@@ -111,8 +144,9 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
               <JustPrintEmbeddedPreview
                 configurationId={state.savedDesignId}
                 previewMode={mode}
+                engineMode="full"
                 fillHeight
-                interactive
+                interactive={mode === "2d"}
                 className="h-full"
               />
             </div>

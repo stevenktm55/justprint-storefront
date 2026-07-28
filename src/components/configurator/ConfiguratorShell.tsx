@@ -53,6 +53,7 @@ import {
   notifyParentAddToCart,
   readShopifyQueryParams,
 } from "@/lib/shopify-bridge";
+import { useIsLargeScreen } from "@/lib/use-media-query";
 import type {
   ConfiguratorStep,
   JustPrintAddToCartMessage,
@@ -139,6 +140,7 @@ export function ConfiguratorShell() {
   } = useStorefront();
   const { tenant, allowedParentOrigins } = useStorefrontTenant();
   const searchParams = useSearchParams();
+  const isLargeScreen = useIsLargeScreen();
   const [quitOpen, setQuitOpen] = useState(false);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
@@ -497,7 +499,8 @@ export function ConfiguratorShell() {
         onDismiss={dismissIncompatibleDraftNotice}
       />
 
-      <StickyMobilePreview visible={showStickyMobilePreview} />
+      {/* Une seule surface d’aperçu montée : sticky mobile XOR desktop. */}
+      <StickyMobilePreview visible={showStickyMobilePreview && !isLargeScreen} />
 
       <div className="mx-auto flex min-h-0 w-full max-w-[var(--rm-max-width)] flex-1 flex-col overflow-hidden lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-6 lg:px-4 lg:pt-4">
         <main className="rm-scroll min-h-0 flex-1 px-4 py-4 lg:pr-0">
@@ -525,7 +528,7 @@ export function ConfiguratorShell() {
           </div>
         </main>
 
-        {state.currentStep < 5 ? <DesktopPreview /> : null}
+        {state.currentStep < 5 && isLargeScreen ? <DesktopPreview /> : null}
       </div>
 
       <StickyActionBar

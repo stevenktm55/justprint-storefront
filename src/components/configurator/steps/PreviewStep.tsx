@@ -127,11 +127,18 @@ export function PreviewStep({
       </div>
 
       <div className="relative">
-        <JustPrintEmbeddedPreview
-          configurationId={state.savedDesignId}
-          previewMode={mode}
-          interactive={mode === "2d"}
-        />
+        {!previewExpanded ? (
+          <JustPrintEmbeddedPreview
+            configurationId={state.savedDesignId}
+            previewMode={mode}
+            engineMode="full"
+            interactive={mode === "2d"}
+          />
+        ) : (
+          <div className="flex min-h-[240px] items-center justify-center rounded-[var(--rm-radius)] border border-[var(--rm-border)] bg-[var(--rm-surface)] text-xs text-[var(--rm-text-muted)]">
+            Aperçu agrandi
+          </div>
+        )}
         <button
           type="button"
           onClick={() => setPreviewExpanded(true)}
