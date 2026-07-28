@@ -22,8 +22,7 @@ export const rawmotoTenantConfig: StorefrontTenantConfig = {
   allowedParentOrigins: [
     "https://rawmoto.fr",
     "https://www.rawmoto.fr",
-    // Future: RawMoto Shopify storefront / myshopify preview domain
-    // "https://rawmoto.myshopify.com",
+    "https://26578d-f2.myshopify.com",
   ],
   features: {
     enable3dPreview: true,

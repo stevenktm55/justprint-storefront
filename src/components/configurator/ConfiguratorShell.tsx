@@ -186,9 +186,7 @@ export function ConfiguratorShell() {
   }, [allowedParentOrigins]);
 
   const showStickyMobilePreview =
-    state.currentStep === 2 ||
-    state.currentStep === 3 ||
-    state.currentStep === 4;
+    state.currentStep === 3 || state.currentStep === 4;
 
   const canProceed = useMemo(() => {
     switch (state.currentStep) {
@@ -532,7 +530,9 @@ export function ConfiguratorShell() {
           </div>
         </main>
 
-        {state.currentStep < 5 && isLargeScreen ? <DesktopPreview /> : null}
+        {state.currentStep >= 3 && state.currentStep <= 4 && isLargeScreen ? (
+          <DesktopPreview />
+        ) : null}
       </div>
 
       <StickyActionBar

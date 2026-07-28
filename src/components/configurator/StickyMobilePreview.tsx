@@ -19,7 +19,8 @@ interface StickyMobilePreviewProps {
 }
 
 /**
- * Vignette sticky (Design → Logos).
+ * Vignette sticky (Personnalisation → Logos).
+ * Invisible aux étapes Moto / Design — le viewer précharge en mode background.
  * En 3D remote : chrome + ancre pour le viewer persistant (pas d’iframe ici).
  * En mock / 2D : JustPrintEmbeddedPreview local ou embed legacy.
  */

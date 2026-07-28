@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { ConfiguratorShell } from "@/components/configurator/ConfiguratorShell";
 import { ShopErrorScreen } from "@/components/storefront/ShopErrorScreen";
+import { StorefrontParentOriginProbe } from "@/components/storefront/StorefrontParentOriginProbe";
 import { ConfiguratorProvider } from "@/context/ConfiguratorContext";
 import { PersistentStorefrontViewerProvider } from "@/context/PersistentStorefrontViewerContext";
 import { StorefrontProvider } from "@/context/StorefrontContext";
@@ -33,6 +34,7 @@ function ConfiguratorPageContent() {
       <ConfiguratorProvider>
         <StorefrontProvider>
           <PersistentStorefrontViewerProvider>
+            <StorefrontParentOriginProbe />
             <ConfiguratorShell />
           </PersistentStorefrontViewerProvider>
         </StorefrontProvider>
