@@ -128,7 +128,7 @@ export function PreviewStep({
 
       <div className="relative">
         <JustPrintEmbeddedPreview
-          configurationId={state.configurationId}
+          configurationId={state.savedDesignId}
           previewMode={mode}
           interactive={mode === "2d"}
         />
@@ -267,7 +267,7 @@ export function PreviewStep({
           <div className="min-h-0 flex-1 px-3 pb-2">
             <div className="h-full overflow-hidden rounded-[var(--rm-radius)] border border-[var(--rm-border)] bg-[var(--rm-surface)]">
               <JustPrintEmbeddedPreview
-                configurationId={state.configurationId}
+                configurationId={state.savedDesignId}
                 previewMode={mode}
                 fillHeight
                 interactive={mode === "2d"}

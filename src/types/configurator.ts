@@ -60,7 +60,9 @@ export interface ShopifyQueryParams {
 
 /** Commercial summary prepared for a future Shopify cart line item. */
 export interface ShopifyCartSummary {
+  /** UUID réel saved_designs (également exposé comme _justprint_id). */
   configurationId: string;
+  publicId: string;
   bikeLabel: string;
   designName: string;
   riderName: string;
@@ -115,8 +117,10 @@ export interface JustPrintAddToCartSummary {
 /** Outgoing: ask the parent Shopify page to add the configured kit to cart. */
 export interface JustPrintAddToCartMessage {
   type: "JUSTPRINT_ADD_TO_CART";
+  /** UUID réel `saved_designs.id` — jamais le publicId, jamais l’editToken. */
   configurationId: string;
-  variantId: string | null;
+  /** Référence lisible JP-RM-XXXXXX. */
+  publicId: string;
   source: "justprint-storefront";
   summary: JustPrintAddToCartSummary;
 }
@@ -148,8 +152,8 @@ export type JustPrintCompletionResult = JustPrintPreviewResult & {
   configurationId: string;
 };
 
-/** Version du schéma de brouillon localStorage (structure remote actuelle). */
-export const CURRENT_DRAFT_SCHEMA_VERSION = 2 as const;
+/** Version du schéma de brouillon localStorage (saved_designs). */
+export const CURRENT_DRAFT_SCHEMA_VERSION = 3 as const;
 
 export type DraftSchemaVersion = typeof CURRENT_DRAFT_SCHEMA_VERSION;
 
@@ -168,9 +172,12 @@ export interface ConfiguratorState {
   selectedLogos: SelectedLogo[];
   previewView: PreviewView;
   productionChecks: ProductionCheck[];
-  /** UUID interne JustPrint (jamais exposé au panier Shopify). */
-  configurationId: string | null;
-  /** Identifiant public JP-RM-… — utilisé dans le panier / postMessage. */
+  /**
+   * UUID réel `saved_designs.id` (jamais exposé comme Configuration Shopify).
+   * Remplace l’ancien configurationId de `storefront_configurations`.
+   */
+  savedDesignId: string | null;
+  /** Identifiant public JP-RM-… — utilisé dans le panier / postMessage.publicId. */
   publicId: string | null;
   /**
    * Jeton d’édition JustPrint.
@@ -231,7 +238,7 @@ export function createInitialState(): ConfiguratorState {
     selectedLogos: [],
     previewView: "left",
     productionChecks: DEFAULT_PRODUCTION_CHECKS.map((check) => ({ ...check })),
-    configurationId: null,
+    savedDesignId: null,
     publicId: null,
     editToken: null,
     configurationStatus: null,

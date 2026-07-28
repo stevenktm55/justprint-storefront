@@ -41,7 +41,7 @@ function baseClientDraft(overrides: Record<string, unknown> = {}) {
     selectedLogos: [],
     previewView: "left",
     productionChecks: [],
-    configurationId: null,
+    savedDesignId: null,
     publicId: null,
     editToken: null,
     configurationStatus: null,
@@ -89,7 +89,7 @@ describe("migrateDraft / draft schema validation", () => {
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.serverCleared).toBe(true);
-    expect(result.state.configurationId).toBeNull();
+    expect(result.state.savedDesignId).toBeNull();
     expect(result.state.publicId).toBeNull();
     expect(result.state.editToken).toBeNull();
     expect(result.state.bike?.id).toBe("ktm-450-sxf-2025");
@@ -98,19 +98,20 @@ describe("migrateDraft / draft schema validation", () => {
     expect(hasValidServerConfiguration(result.state)).toBe(false);
   });
 
-  it("clears configurationId without editToken", () => {
+  it("clears savedDesignId without editToken", () => {
     const result = migrateDraft(
       baseClientDraft({
-        configurationId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        savedDesignId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         publicId: "JP-RM-ABC123",
         editToken: null,
         configurationStatus: "draft",
+        draftSchemaVersion: CURRENT_DRAFT_SCHEMA_VERSION,
       }),
     );
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.serverCleared).toBe(true);
-    expect(result.state.configurationId).toBeNull();
+    expect(result.state.savedDesignId).toBeNull();
     expect(result.state.publicId).toBeNull();
     expect(result.state.editToken).toBeNull();
     expect(result.state.selectedDesign).toBe("factory-01");
@@ -119,17 +120,18 @@ describe("migrateDraft / draft schema validation", () => {
   it("treats finalized drafts as a new local order (no server reuse)", () => {
     const result = migrateDraft(
       baseClientDraft({
-        configurationId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        savedDesignId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         publicId: "JP-RM-FIN001",
         editToken: "edit-token-secret",
         configurationStatus: "finalized",
+        draftSchemaVersion: CURRENT_DRAFT_SCHEMA_VERSION,
       }),
     );
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.wasFinalized).toBe(true);
     expect(result.serverCleared).toBe(true);
-    expect(result.state.configurationId).toBeNull();
+    expect(result.state.savedDesignId).toBeNull();
     expect(result.state.editToken).toBeNull();
     expect(result.state.configurationStatus).toBeNull();
     expect(result.state.bike?.brand).toBe("KTM");
@@ -140,11 +142,32 @@ describe("migrateDraft / draft schema validation", () => {
     expect(completed).toBeTruthy();
   });
 
-  it("keeps a valid remote draft triple", () => {
+  it("clears legacy schema v2 configuration ids (old configurations flow)", () => {
+    const result = migrateDraft(
+      baseClientDraft({
+        draftSchemaVersion: 2,
+        configurationId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        publicId: "JP-RM-LEGACY",
+        editToken: "edit-token-secret",
+        configurationStatus: "draft",
+        lastSavedAt: "2026-07-27T10:00:00.000Z",
+      }),
+    );
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.serverCleared).toBe(true);
+    expect(result.state.savedDesignId).toBeNull();
+    expect(result.state.publicId).toBeNull();
+    expect(result.state.editToken).toBeNull();
+    expect(result.state.draftSchemaVersion).toBe(3);
+    expect(hasValidServerConfiguration(result.state)).toBe(false);
+  });
+
+  it("keeps a valid saved_designs draft triple (schema ≥ 3)", () => {
     const result = migrateDraft(
       baseClientDraft({
         draftSchemaVersion: CURRENT_DRAFT_SCHEMA_VERSION,
-        configurationId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        savedDesignId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         publicId: "JP-RM-VALID1",
         editToken: "edit-token-secret",
         configurationStatus: "draft",
@@ -154,7 +177,7 @@ describe("migrateDraft / draft schema validation", () => {
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.serverCleared).toBe(false);
-    expect(result.state.configurationId).toBe(
+    expect(result.state.savedDesignId).toBe(
       "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
     );
     expect(result.state.publicId).toBe("JP-RM-VALID1");
@@ -204,13 +227,13 @@ describe("migrateDraft / draft schema validation", () => {
     expect(loaded.status).toBe("restored");
     if (loaded.status !== "restored") return;
 
-    expect(loaded.state.configurationId).toBeNull();
+    expect(loaded.state.savedDesignId).toBeNull();
     expect(loaded.state.draftSchemaVersion).toBe(CURRENT_DRAFT_SCHEMA_VERSION);
 
     const persisted = JSON.parse(
       window.localStorage.getItem(DRAFT_STORAGE_KEY)!,
     ) as Record<string, unknown>;
-    expect(persisted.configurationId).toBeNull();
+    expect(persisted.savedDesignId).toBeNull();
     expect(persisted.draftSchemaVersion).toBe(CURRENT_DRAFT_SCHEMA_VERSION);
     expect(persisted.selectedDesign).toBe("factory-01");
   });
@@ -220,7 +243,7 @@ describe("migrateDraft / draft schema validation", () => {
       ...createInitialState(),
       bike: validBike,
       selectedDesign: "factory-01",
-      configurationId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      savedDesignId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
       publicId: "JP-RM-X",
       editToken: "token",
       configurationStatus: "draft" as const,

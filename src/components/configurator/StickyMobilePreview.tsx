@@ -65,7 +65,7 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
           <div className="px-4 pb-2 pt-1">
             <div className="h-[188px] overflow-hidden rounded-[var(--rm-radius-sm)] border border-[var(--rm-border)] bg-[var(--rm-surface)] sm:h-[200px]">
               <JustPrintEmbeddedPreview
-                configurationId={state.configurationId}
+                configurationId={state.savedDesignId}
                 previewMode={mode}
                 fillHeight
                 showBadge={false}
@@ -109,7 +109,7 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
           <div className="min-h-0 flex-1 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
             <div className="h-full overflow-hidden rounded-[var(--rm-radius)] border border-[var(--rm-border)]">
               <JustPrintEmbeddedPreview
-                configurationId={state.configurationId}
+                configurationId={state.savedDesignId}
                 previewMode={mode}
                 fillHeight
                 interactive

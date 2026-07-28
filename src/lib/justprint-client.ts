@@ -5,8 +5,11 @@
 export {
   justPrintClient,
   getStorefrontBootstrap,
+  createSavedDesign,
   createConfiguration,
+  updateSavedDesign,
   updateConfiguration,
+  finalizeSavedDesign,
   finalizeConfiguration,
   generateConfigurationPreview,
   completeConfiguration,

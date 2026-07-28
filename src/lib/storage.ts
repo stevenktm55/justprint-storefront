@@ -224,24 +224,24 @@ export function isLegacyMockConfigurationId(id: string): boolean {
 }
 
 /**
- * True when the draft already has a usable JustPrint server triple.
+ * True when the draft already has a usable JustPrint saved_design triple.
  * Finalized configs must NOT be reused for a new kit.
  */
 export function hasValidServerConfiguration(
   state: Pick<
     ConfiguratorState,
-    "configurationId" | "publicId" | "editToken" | "configurationStatus"
+    "savedDesignId" | "publicId" | "editToken" | "configurationStatus"
   >,
 ): boolean {
   if (
-    !state.configurationId ||
+    !state.savedDesignId ||
     !state.publicId ||
     !state.editToken ||
     state.configurationStatus === "finalized"
   ) {
     return false;
   }
-  if (isLegacyMockConfigurationId(state.configurationId)) {
+  if (isLegacyMockConfigurationId(state.savedDesignId)) {
     return false;
   }
   return true;
@@ -343,10 +343,13 @@ export function migrateDraft(raw: unknown): MigrateDraftResult {
     raw.configurationStatus,
   );
 
-  const configurationId =
-    typeof raw.configurationId === "string" && raw.configurationId.trim()
-      ? raw.configurationId.trim()
-      : null;
+  // Prefer savedDesignId (schema ≥ 3); fall back to legacy configurationId.
+  const savedDesignIdRaw =
+    typeof raw.savedDesignId === "string" && raw.savedDesignId.trim()
+      ? raw.savedDesignId.trim()
+      : typeof raw.configurationId === "string" && raw.configurationId.trim()
+        ? raw.configurationId.trim()
+        : null;
   const publicId =
     typeof raw.publicId === "string" && raw.publicId.trim()
       ? raw.publicId.trim()
@@ -356,17 +359,24 @@ export function migrateDraft(raw: unknown): MigrateDraftResult {
       ? raw.editToken.trim()
       : null;
 
+  const rawSchemaVersion =
+    typeof raw.draftSchemaVersion === "number" &&
+    Number.isFinite(raw.draftSchemaVersion)
+      ? raw.draftSchemaVersion
+      : 0;
+
   const wasFinalized = configurationStatus === "finalized";
   const hasFullServerTriple = Boolean(
-    configurationId &&
+    savedDesignIdRaw &&
       publicId &&
       editToken &&
-      !isLegacyMockConfigurationId(configurationId),
+      !isLegacyMockConfigurationId(savedDesignIdRaw),
   );
 
-  // Incomplete / mock / finalized triples → clear so a fresh remote draft can be created.
-  // Only keep a server link when bike + design are both confirmed (remote create needs both).
+  // Schema < 3 belongs to the old storefront_configurations flow — never reuse
+  // those ids against saved-designs. Also clear incomplete / mock / finalized.
   const keepServer =
+    rawSchemaVersion >= CURRENT_DRAFT_SCHEMA_VERSION &&
     hasFullServerTriple &&
     !wasFinalized &&
     Boolean(normalizedBike && selectedDesign);
@@ -395,7 +405,7 @@ export function migrateDraft(raw: unknown): MigrateDraftResult {
         ? raw.previewView
         : "left",
     productionChecks: normalizeProductionChecks(raw.productionChecks),
-    configurationId: keepServer ? configurationId : null,
+    savedDesignId: keepServer ? savedDesignIdRaw : null,
     publicId: keepServer ? publicId : null,
     editToken: keepServer ? editToken : null,
     configurationStatus: keepServer
@@ -412,7 +422,7 @@ export function migrateDraft(raw: unknown): MigrateDraftResult {
 
   const serverCleared =
     !keepServer &&
-    Boolean(configurationId || publicId || editToken || wasFinalized);
+    Boolean(savedDesignIdRaw || publicId || editToken || wasFinalized);
 
   if (wasFinalized) {
     // Keep a summary of the last order; start a fresh local draft from the same choices.
@@ -420,7 +430,8 @@ export function migrateDraft(raw: unknown): MigrateDraftResult {
       saveCompletedConfiguration({
         summary: buildCompletionSummary(migrated),
         publicId,
-        configurationId,
+        configurationId: savedDesignIdRaw,
+        savedDesignId: savedDesignIdRaw,
         source: "finalized-draft-migration",
       });
     } catch {
@@ -443,7 +454,7 @@ export function hasDraftProgress(state: Pick<
   | "selectedDesign"
   | "riderName"
   | "selectedLogos"
-  | "configurationId"
+  | "savedDesignId"
   | "publicId"
 >): boolean {
   return (
@@ -452,7 +463,7 @@ export function hasDraftProgress(state: Pick<
     Boolean(state.selectedDesign) ||
     Boolean(state.riderName) ||
     state.selectedLogos.length > 0 ||
-    Boolean(state.configurationId) ||
+    Boolean(state.savedDesignId) ||
     Boolean(state.publicId)
   );
 }
@@ -582,7 +593,7 @@ function sanitizeCompletedPayload(payload: unknown): unknown {
 
 /** Public display id — prefer publicId, never editToken. */
 export function getDisplayConfigurationId(
-  state: Pick<ConfiguratorState, "publicId" | "configurationId">,
+  state: Pick<ConfiguratorState, "publicId" | "savedDesignId">,
 ): string | null {
-  return state.publicId ?? state.configurationId;
+  return state.publicId ?? state.savedDesignId;
 }

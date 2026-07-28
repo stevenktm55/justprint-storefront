@@ -50,14 +50,14 @@ export type ConfiguratorAction =
   | {
       type: "SET_SERVER_CONFIGURATION";
       payload: {
-        configurationId: string;
+        savedDesignId: string;
         publicId: string;
         editToken: string;
         status: ConfigurationStatus;
         lastSavedAt?: string | null;
       };
     }
-  | { type: "SET_CONFIGURATION_ID"; payload: string }
+  | { type: "SET_SAVED_DESIGN_ID"; payload: string }
   | { type: "SET_PUBLIC_ID"; payload: string }
   | { type: "SET_CONFIGURATION_STATUS"; payload: ConfigurationStatus }
   | { type: "SET_LAST_SAVED_AT"; payload: string | null }
@@ -249,13 +249,13 @@ export function configuratorReducer(
         ),
       };
 
-    case "SET_CONFIGURATION_ID":
-      return { ...state, configurationId: action.payload };
+    case "SET_SAVED_DESIGN_ID":
+      return { ...state, savedDesignId: action.payload };
 
     case "SET_SERVER_CONFIGURATION":
       return {
         ...state,
-        configurationId: action.payload.configurationId,
+        savedDesignId: action.payload.savedDesignId,
         publicId: action.payload.publicId,
         editToken: action.payload.editToken,
         configurationStatus: action.payload.status,
@@ -279,7 +279,7 @@ export function configuratorReducer(
     case "CLEAR_SERVER_CONFIGURATION":
       return {
         ...state,
-        configurationId: null,
+        savedDesignId: null,
         publicId: null,
         editToken: null,
         configurationStatus: null,

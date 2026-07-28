@@ -63,10 +63,11 @@ Jamais de fallback silencieux vers une autre boutique.
 
 `NEXT_PUBLIC_JUSTPRINT_MODE=remote` + `NEXT_PUBLIC_JUSTPRINT_API_URL` (ex. `https://www.justprint.app`) :
 
-- `POST /api/storefront/configurations` à la confirmation moto + design
-- `PATCH` automatique (debounce ~700 ms) avec `X-JustPrint-Edit-Token`
-- `POST …/finalize` avant `JUSTPRINT_ADD_TO_CART` (le message utilise le `publicId`)
-- catalogue : fallback mock tant que `/api/storefront/bootstrap` n’existe pas
+- `GET /api/storefront/bootstrap?shop=rawmoto` pour le catalogue réel
+- `POST /api/storefront/saved-designs` à la confirmation moto + design
+- `PATCH /api/storefront/saved-designs/:id` automatique (debounce ~700 ms) avec `X-JustPrint-Edit-Token`
+- `POST …/finalize` avant `JUSTPRINT_ADD_TO_CART`
+- postMessage : `configurationId` = UUID `saved_designs`, `publicId` = `JP-RM-…` (jamais `editToken`)
 - les composants React n’appellent jamais `fetch` directement
 - brouillon `localStorage` conservé en cas d’indisponibilité (`editToken` jamais exposé UI / panier / logs)
 
@@ -106,7 +107,8 @@ Sur Vercel, définir notamment :
 
 ```text
 NEXT_PUBLIC_APP_ENV=production
-NEXT_PUBLIC_JUSTPRINT_MODE=mock
+NEXT_PUBLIC_JUSTPRINT_MODE=remote
+NEXT_PUBLIC_JUSTPRINT_API_URL=https://www.justprint.app
 NEXT_PUBLIC_DEFAULT_SHOP=rawmoto
 ```
 

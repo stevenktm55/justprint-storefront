@@ -14,11 +14,11 @@ import {
   mockUpdateConfiguration,
 } from "@/lib/justprint/mock-client";
 import {
-  remoteCreateConfiguration,
-  remoteFinalizeConfiguration,
+  remoteCreateSavedDesign,
+  remoteFinalizeSavedDesign,
   remoteGenerateConfigurationPreview,
   remoteGetStorefrontBootstrap,
-  remoteUpdateConfiguration,
+  remoteUpdateSavedDesign,
 } from "@/lib/justprint/remote-client";
 import { getCompatibleDesigns as catalogCompatibleDesigns } from "@/lib/justprint/catalog";
 import {
@@ -63,75 +63,84 @@ export async function getStorefrontBootstrap(
   });
 }
 
-export async function createConfiguration(
+export async function createSavedDesign(
   body: StorefrontConfigurationCreateBody,
 ): Promise<CreateConfigurationResponse> {
   return withErrorBoundary(async () => {
     if (isJustPrintMockMode()) {
       return mockCreateConfiguration(body);
     }
-    return remoteCreateConfiguration(body);
+    return remoteCreateSavedDesign(body);
   });
 }
 
-export async function updateConfiguration(
-  configurationId: string,
+/** @deprecated Prefer createSavedDesign */
+export const createConfiguration = createSavedDesign;
+
+export async function updateSavedDesign(
+  savedDesignId: string,
   editToken: string,
   body: StorefrontConfigurationPatchBody,
 ): Promise<UpdateConfigurationResponse> {
   return withErrorBoundary(async () => {
     if (isJustPrintMockMode()) {
-      return mockUpdateConfiguration(configurationId, editToken, body);
+      return mockUpdateConfiguration(savedDesignId, editToken, body);
     }
-    return remoteUpdateConfiguration(configurationId, editToken, body);
+    return remoteUpdateSavedDesign(savedDesignId, editToken, body);
   });
 }
 
-export async function finalizeConfiguration(
-  configurationId: string,
+/** @deprecated Prefer updateSavedDesign */
+export const updateConfiguration = updateSavedDesign;
+
+export async function finalizeSavedDesign(
+  savedDesignId: string,
   editToken: string,
 ): Promise<FinalizeConfigurationResponse> {
   return withErrorBoundary(async () => {
     if (isJustPrintMockMode()) {
-      return mockFinalizeConfiguration(configurationId, editToken);
+      return mockFinalizeConfiguration(savedDesignId, editToken);
     }
-    return remoteFinalizeConfiguration(configurationId, editToken);
+    return remoteFinalizeSavedDesign(savedDesignId, editToken);
   });
 }
 
+/** @deprecated Prefer finalizeSavedDesign */
+export const finalizeConfiguration = finalizeSavedDesign;
+
 export async function generateConfigurationPreview(
-  configurationId: string,
+  savedDesignId: string,
 ): Promise<JustPrintPreviewResult> {
   return withErrorBoundary(async () => {
     if (isJustPrintMockMode()) {
-      return mockGenerateConfigurationPreview(configurationId);
+      return mockGenerateConfigurationPreview(savedDesignId);
     }
-    return remoteGenerateConfigurationPreview(configurationId);
+    return remoteGenerateConfigurationPreview(savedDesignId);
   });
 }
 
 export async function completeConfiguration(
-  configurationId: string,
+  savedDesignId: string,
   editToken?: string,
 ): Promise<CompletedConfiguration> {
   return withErrorBoundary(async () => {
     if (isJustPrintMockMode()) {
-      return mockCompleteConfiguration(configurationId);
+      return mockCompleteConfiguration(savedDesignId);
     }
     if (!editToken) {
       throw toJustPrintError(
-        new Error("editToken required to finalize a remote configuration"),
+        new Error("editToken required to finalize a remote saved design"),
       );
     }
-    const finalized = await remoteFinalizeConfiguration(
-      configurationId,
+    const finalized = await remoteFinalizeSavedDesign(
+      savedDesignId,
       editToken,
     );
     return {
       configurationId: finalized.configurationId,
       publicId: finalized.publicId,
       status: "finalized",
-      previewMode: finalized.previewMode,
+      previewMode: finalized.previewMode ?? "3d",
       previewUrl: finalized.previewUrl ?? "",
     };
   });
@@ -181,9 +190,9 @@ export interface JustPrintClient {
 
 export const justPrintClient: JustPrintClient = {
   getStorefrontBootstrap,
-  createConfiguration,
-  updateConfiguration,
-  finalizeConfiguration,
+  createConfiguration: createSavedDesign,
+  updateConfiguration: updateSavedDesign,
+  finalizeConfiguration: finalizeSavedDesign,
   generateConfigurationPreview,
   completeConfiguration,
 
@@ -197,7 +206,7 @@ export const justPrintClient: JustPrintClient = {
     context: SnapshotContext,
   ): Promise<{ ok: true }> {
     if (
-      !state.configurationId ||
+      !state.savedDesignId ||
       !state.editToken ||
       !state.bike ||
       !state.selectedDesign
@@ -205,8 +214,8 @@ export const justPrintClient: JustPrintClient = {
       return { ok: true };
     }
 
-    await updateConfiguration(
-      state.configurationId,
+    await updateSavedDesign(
+      state.savedDesignId,
       state.editToken,
       buildPatchConfigurationBody(state, context),
     );
@@ -217,8 +226,8 @@ export const justPrintClient: JustPrintClient = {
   async generatePreview(
     state: ConfiguratorState,
   ): Promise<JustPrintPreviewResult> {
-    if (state.configurationId) {
-      return generateConfigurationPreview(state.configurationId);
+    if (state.savedDesignId) {
+      return generateConfigurationPreview(state.savedDesignId);
     }
 
     if (isJustPrintMockMode()) {
@@ -230,7 +239,7 @@ export const justPrintClient: JustPrintClient = {
     }
 
     throw toJustPrintError(
-      new Error("configurationId required to generate a remote preview"),
+      new Error("savedDesignId required to generate a remote preview"),
     );
   },
 
@@ -255,24 +264,24 @@ export const justPrintClient: JustPrintClient = {
       return mockLegacyCompleteFromState(state);
     }
 
-    const configurationId = state.configurationId;
+    const savedDesignId = state.savedDesignId;
     const editToken = state.editToken;
-    if (!configurationId || !editToken) {
+    if (!savedDesignId || !editToken) {
       throw toJustPrintError(
         new Error(
-          "configurationId and editToken required to complete configuration",
+          "savedDesignId and editToken required to complete configuration",
         ),
       );
     }
 
     await justPrintClient.saveDraft(state, context);
-    const completed = await completeConfiguration(configurationId, editToken);
-    const cartId = completed.publicId ?? configurationId;
+    const completed = await completeConfiguration(savedDesignId, editToken);
+    const cartId = completed.publicId ?? savedDesignId;
 
     if (completed.previewMode === "2d") {
       return {
         previewMode: "2d",
-        previewId: `preview-${configurationId}`,
+        previewId: `preview-${savedDesignId}`,
         previewUrl: completed.previewUrl,
         template2dId: completed.template2dId ?? "",
         pieceIds: completed.pieceIds,
@@ -282,7 +291,7 @@ export const justPrintClient: JustPrintClient = {
 
     return {
       previewMode: "3d",
-      previewId: `preview-${configurationId}`,
+      previewId: `preview-${savedDesignId}`,
       previewUrl: completed.previewUrl,
       model3dId: completed.model3dId ?? "jp-3d-fallback",
       availableViews: completed.availableViews,

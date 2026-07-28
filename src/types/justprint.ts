@@ -7,6 +7,13 @@ export interface StorefrontShop {
   slug: string;
 }
 
+export interface StorefrontColorSlot {
+  key: string;
+  label: string;
+  defaultHex: string;
+  isPlate?: boolean;
+}
+
 type StorefrontBikeBase = {
   id: string;
   brand: string;
@@ -14,6 +21,8 @@ type StorefrontBikeBase = {
   year: string;
   thumbnailUrl?: string;
   previewUrl?: string;
+  /** Slots couleur issus du bootstrap JustPrint (pilote remote). */
+  colorSlots?: StorefrontColorSlot[];
 };
 
 /** Moto avec modèle 3D JustPrint. */
@@ -44,13 +53,8 @@ export interface StorefrontDesign {
   compatibleBikeIds?: string[];
 }
 
-export type StorefrontLogoCategoryId =
-  | "pneus"
-  | "suspensions"
-  | "equipement"
-  | "huiles"
-  | "accessoires"
-  | "sponsors";
+/** Catégories mock historiques + ids libres renvoyés par le bootstrap remote. */
+export type StorefrontLogoCategoryId = string;
 
 export interface StorefrontLogoCategory {
   id: StorefrontLogoCategoryId;
@@ -61,6 +65,7 @@ export interface StorefrontLogo {
   id: string;
   name: string;
   category: StorefrontLogoCategoryId;
+  imageUrl?: string;
 }
 
 /** Réponse unique de bootstrap storefront. */
@@ -183,29 +188,45 @@ export interface ConfigurationDraft {
   updatedAt: string;
 }
 
-export interface CreateConfigurationResponse {
+/** Réponse POST /api/storefront/saved-designs (configurationId = UUID saved_designs). */
+export interface CreateSavedDesignResponse {
+  /** UUID réel `saved_designs.id`. */
   configurationId: string;
   publicId: string;
   editToken: string;
-  status: ConfigurationStatus;
+  status: ConfigurationStatus | string;
   createdAt: string;
+  productId?: string;
+  warnings?: string[];
 }
 
-export interface UpdateConfigurationResponse {
+/** @deprecated Prefer CreateSavedDesignResponse */
+export type CreateConfigurationResponse = CreateSavedDesignResponse;
+
+export interface UpdateSavedDesignResponse {
   configurationId: string;
   publicId: string;
-  status: ConfigurationStatus;
+  status: ConfigurationStatus | string;
   updatedAt: string;
+  finalized?: boolean;
 }
 
-export interface FinalizeConfigurationResponse {
+/** @deprecated Prefer UpdateSavedDesignResponse */
+export type UpdateConfigurationResponse = UpdateSavedDesignResponse;
+
+export interface FinalizeSavedDesignResponse {
   configurationId: string;
   publicId: string;
-  status: ConfigurationStatus;
-  previewMode: PreviewMode;
-  previewUrl: string | null;
-  productionStatus: "not_generated" | "ready" | "pending" | "error";
+  status: ConfigurationStatus | string;
+  previewMode?: PreviewMode;
+  previewUrl?: string | null;
+  productionStatus?: "not_generated" | "ready" | "pending" | "error";
+  source?: string | null;
+  warnings?: string[];
 }
+
+/** @deprecated Prefer FinalizeSavedDesignResponse */
+export type FinalizeConfigurationResponse = FinalizeSavedDesignResponse;
 
 export interface CompletedConfiguration {
   configurationId: string;

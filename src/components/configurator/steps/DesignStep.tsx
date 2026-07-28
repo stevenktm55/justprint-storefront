@@ -37,6 +37,15 @@ export function DesignStep() {
   const { designs } = useStorefront();
   const keepingChoices = state.returnToFinalPreview;
 
+  const visibleDesigns = state.bike
+    ? designs.filter((design) => {
+        if (!design.compatibleBikeIds || design.compatibleBikeIds.length === 0) {
+          return true;
+        }
+        return design.compatibleBikeIds.includes(state.bike!.id);
+      })
+    : designs;
+
   return (
     <div className="flex flex-col gap-5">
       <div>
@@ -51,7 +60,7 @@ export function DesignStep() {
       </div>
 
       <div className="grid grid-cols-1 gap-3 min-[430px]:grid-cols-2">
-        {designs.map((design) => (
+        {visibleDesigns.map((design) => (
           <SelectionCard
             key={design.id}
             title={design.name}
@@ -66,27 +75,46 @@ export function DesignStep() {
 
               // Keep existing colors when switching design from the final preview.
               if (!keepingChoices) {
-                dispatch({
-                  type: "APPLY_DESIGN_PALETTE",
-                  payload: [
-                    {
-                      ...DEFAULT_PALETTE[0],
-                      hex: design.accentColors[0],
-                      label: "Couleur 1",
-                    },
-                    {
-                      ...DEFAULT_PALETTE[1],
-                      hex: design.accentColors[1],
-                      label: "Couleur 2",
-                    },
-                    {
-                      ...DEFAULT_PALETTE[2],
-                      hex: design.accentColors[2],
-                      label: "Couleur 3",
-                    },
-                    DEFAULT_PALETTE[3],
-                  ],
-                });
+                const slots = state.bike?.colorSlots?.filter((s) => !s.isPlate);
+                if (slots && slots.length > 0) {
+                  dispatch({
+                    type: "APPLY_DESIGN_PALETTE",
+                    payload: slots.map((slot, index) => ({
+                      id: slot.key,
+                      label: slot.label || `Couleur ${index + 1}`,
+                      hex: slot.defaultHex,
+                    })),
+                  });
+                  const plate = state.bike?.colorSlots?.find((s) => s.isPlate);
+                  if (plate) {
+                    dispatch({
+                      type: "SET_PLATE_COLOR",
+                      payload: plate.defaultHex,
+                    });
+                  }
+                } else {
+                  dispatch({
+                    type: "APPLY_DESIGN_PALETTE",
+                    payload: [
+                      {
+                        ...DEFAULT_PALETTE[0],
+                        hex: design.accentColors[0],
+                        label: "Couleur 1",
+                      },
+                      {
+                        ...DEFAULT_PALETTE[1],
+                        hex: design.accentColors[1],
+                        label: "Couleur 2",
+                      },
+                      {
+                        ...DEFAULT_PALETTE[2],
+                        hex: design.accentColors[2],
+                        label: "Couleur 3",
+                      },
+                      DEFAULT_PALETTE[3],
+                    ],
+                  });
+                }
               }
             }}
             media={<DesignPlaceholder colors={design.accentColors} />}

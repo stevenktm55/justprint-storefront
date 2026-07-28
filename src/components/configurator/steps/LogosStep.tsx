@@ -123,13 +123,17 @@ export function LogosStep() {
   const { state, dispatch } = useConfigurator();
   const { logoCategories, logos } = useStorefront();
   const [activeCategory, setActiveCategory] =
-    useState<LogoCategoryId>("pneus");
+    useState<LogoCategoryId>("sponsors");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [expandedLogoId, setExpandedLogoId] = useState<string | null>(null);
+  const resolvedCategory =
+    logoCategories.find((category) => category.id === activeCategory)?.id ??
+    logoCategories[0]?.id ??
+    activeCategory;
   const categoryLogos = useMemo(() => {
     void logos;
-    return getLogosByCategory(activeCategory);
-  }, [activeCategory, logos]);
+    return getLogosByCategory(resolvedCategory);
+  }, [resolvedCategory, logos]);
 
   const selectedLogos = state.selectedLogos;
 
@@ -156,7 +160,7 @@ export function LogosStep() {
           aria-label="Catégories de logos"
         >
           {logoCategories.map((category) => {
-            const selected = activeCategory === category.id;
+            const selected = resolvedCategory === category.id;
             return (
               <button
                 key={category.id}
@@ -178,7 +182,7 @@ export function LogosStep() {
 
         <div
           className="flex snap-x snap-mandatory gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] lg:flex-wrap lg:overflow-visible lg:snap-none [&::-webkit-scrollbar]:hidden"
-          aria-label={`Logos ${logoCategories.find((c) => c.id === activeCategory)?.label ?? ""}`}
+          aria-label={`Logos ${logoCategories.find((c) => c.id === resolvedCategory)?.label ?? ""}`}
         >
           {categoryLogos.map((logo) => {
             const selected = state.selectedLogos.some(
@@ -213,7 +217,7 @@ export function LogosStep() {
             );
           })}
 
-          {activeCategory === "sponsors" ? (
+          {resolvedCategory === "sponsors" ? (
             <button
               type="button"
               onClick={() => setUploadOpen(true)}

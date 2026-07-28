@@ -26,7 +26,7 @@ export function DesktopPreview() {
           Prévisualisation
         </p>
         <JustPrintEmbeddedPreview
-          configurationId={state.configurationId}
+          configurationId={state.savedDesignId}
           previewMode={mode}
           interactive={mode === "2d"}
         />

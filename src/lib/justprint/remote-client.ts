@@ -1,46 +1,57 @@
 import { justPrintFetch } from "@/lib/justprint/fetch";
 import { setStorefrontCatalog } from "@/lib/justprint/catalog";
-import { buildMockStorefrontBootstrap } from "@/lib/justprint/mock-bootstrap";
+import { normalizeStorefrontBootstrap } from "@/lib/justprint/normalize-bootstrap";
 import type {
-  CreateConfigurationResponse,
-  FinalizeConfigurationResponse,
+  CreateSavedDesignResponse,
+  FinalizeSavedDesignResponse,
   StorefrontBootstrap,
   StorefrontConfigurationCreateBody,
   StorefrontConfigurationPatchBody,
-  UpdateConfigurationResponse,
+  UpdateSavedDesignResponse,
 } from "@/types/justprint";
 import type { JustPrintPreviewResult } from "@/types/configurator";
 
+type PublicSavedDesignView = {
+  configurationId: string;
+  publicId: string | null;
+  status: string;
+  updatedAt?: string | null;
+  finalized?: boolean;
+  previewMode?: "2d" | "3d" | null;
+};
+
+function mapStatus(
+  status: string,
+  finalized?: boolean,
+): UpdateSavedDesignResponse["status"] {
+  if (finalized || status === "finalized" || status === "completed") {
+    return "finalized";
+  }
+  if (status === "preview_ready") return "preview_ready";
+  return "draft";
+}
+
 /**
- * Catalogue storefront : l’API JustPrint n’expose pas encore /bootstrap.
- * En remote on réutilise le catalogue mock local pour le parcours UI,
- * tandis que create / patch / finalize passent par la vraie API.
+ * Catalogue storefront remote : GET /api/storefront/bootstrap?shop=…
+ * Aucun fallback mock — seuls les produits/designs retournés sont proposés.
  */
 export async function remoteGetStorefrontBootstrap(
   shopId: string,
 ): Promise<StorefrontBootstrap> {
-  try {
-    const bootstrap = await justPrintFetch<StorefrontBootstrap>(
-      "/api/storefront/bootstrap",
-      {
-        method: "GET",
-        searchParams: { shop: shopId },
-      },
-    );
-    setStorefrontCatalog(bootstrap);
-    return bootstrap;
-  } catch {
-    const bootstrap = buildMockStorefrontBootstrap(shopId);
-    setStorefrontCatalog(bootstrap);
-    return bootstrap;
-  }
+  const raw = await justPrintFetch<unknown>("/api/storefront/bootstrap", {
+    method: "GET",
+    searchParams: { shop: shopId },
+  });
+  const bootstrap = normalizeStorefrontBootstrap(raw, shopId);
+  setStorefrontCatalog(bootstrap);
+  return bootstrap;
 }
 
-export async function remoteCreateConfiguration(
+export async function remoteCreateSavedDesign(
   body: StorefrontConfigurationCreateBody,
-): Promise<CreateConfigurationResponse> {
-  return justPrintFetch<CreateConfigurationResponse>(
-    "/api/storefront/configurations",
+): Promise<CreateSavedDesignResponse> {
+  return justPrintFetch<CreateSavedDesignResponse>(
+    "/api/storefront/saved-designs",
     {
       method: "POST",
       body,
@@ -48,43 +59,75 @@ export async function remoteCreateConfiguration(
   );
 }
 
-export async function remoteUpdateConfiguration(
-  configurationId: string,
+export async function remoteUpdateSavedDesign(
+  savedDesignId: string,
   editToken: string,
   body: StorefrontConfigurationPatchBody,
-): Promise<UpdateConfigurationResponse> {
-  return justPrintFetch<UpdateConfigurationResponse>(
-    `/api/storefront/configurations/${encodeURIComponent(configurationId)}`,
+): Promise<UpdateSavedDesignResponse> {
+  const view = await justPrintFetch<PublicSavedDesignView>(
+    `/api/storefront/saved-designs/${encodeURIComponent(savedDesignId)}`,
     {
       method: "PATCH",
       body,
       editToken,
     },
   );
+
+  return {
+    configurationId: view.configurationId,
+    publicId: view.publicId ?? "",
+    status: mapStatus(view.status, view.finalized),
+    updatedAt: view.updatedAt ?? new Date().toISOString(),
+    finalized: Boolean(view.finalized),
+  };
 }
 
-export async function remoteFinalizeConfiguration(
-  configurationId: string,
+export async function remoteFinalizeSavedDesign(
+  savedDesignId: string,
   editToken: string,
-): Promise<FinalizeConfigurationResponse> {
-  return justPrintFetch<FinalizeConfigurationResponse>(
-    `/api/storefront/configurations/${encodeURIComponent(configurationId)}/finalize`,
+): Promise<FinalizeSavedDesignResponse> {
+  const result = await justPrintFetch<{
+    configurationId: string;
+    publicId: string;
+    status: string;
+    source?: string | null;
+    warnings?: string[];
+  }>(
+    `/api/storefront/saved-designs/${encodeURIComponent(savedDesignId)}/finalize`,
     {
       method: "POST",
       body: {},
       editToken,
     },
   );
+
+  return {
+    configurationId: result.configurationId,
+    publicId: result.publicId,
+    status: "finalized",
+    previewMode: "3d",
+    previewUrl: null,
+    productionStatus: "not_generated",
+    source: result.source,
+    warnings: result.warnings,
+  };
 }
 
 /** Preview réel non branché — conserve un stub pour l’UI existante. */
 export async function remoteGenerateConfigurationPreview(
-  configurationId: string,
+  savedDesignId: string,
 ): Promise<JustPrintPreviewResult> {
   return {
     previewMode: "3d",
-    previewId: `preview-${configurationId}`,
+    previewId: `preview-${savedDesignId}`,
     previewUrl: "",
     model3dId: "jp-3d-pending",
   };
 }
+
+/** @deprecated Prefer remoteCreateSavedDesign */
+export const remoteCreateConfiguration = remoteCreateSavedDesign;
+/** @deprecated Prefer remoteUpdateSavedDesign */
+export const remoteUpdateConfiguration = remoteUpdateSavedDesign;
+/** @deprecated Prefer remoteFinalizeSavedDesign */
+export const remoteFinalizeConfiguration = remoteFinalizeSavedDesign;

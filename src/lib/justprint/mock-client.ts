@@ -385,7 +385,7 @@ export async function mockLegacyCompleteFromState(
     "@/lib/justprint/snapshot"
   );
 
-  let configurationId = state.configurationId;
+  let configurationId = state.savedDesignId;
   let publicId = state.publicId;
 
   if (state.bike && state.selectedDesign) {
@@ -420,7 +420,7 @@ export async function mockLegacyCompleteFromState(
   const completed = await mockCompleteConfiguration(configurationId);
   const preview = buildPreviewResultFromState({
     ...state,
-    configurationId,
+    savedDesignId: configurationId,
     publicId: publicId ?? completed.publicId ?? null,
   });
 

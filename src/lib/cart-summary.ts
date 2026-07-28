@@ -48,13 +48,15 @@ export function buildCompletionSummary(
 
 export function buildShopifyCartSummary(
   state: ConfiguratorState,
-  configurationId: string,
+  savedDesignId: string,
+  publicId: string,
   variantId: string | null = null,
 ): ShopifyCartSummary {
   const sorted = sortLogosByProminence(state.selectedLogos);
 
   return {
-    configurationId,
+    configurationId: savedDesignId,
+    publicId,
     bikeLabel: formatBikeLabel(state.bike),
     designName: getDesignName(state.selectedDesign),
     riderName: state.riderName,
@@ -86,16 +88,47 @@ export function buildAddToCartSummary(
   };
 }
 
+export type CartReadyIssue =
+  | "bike"
+  | "design"
+  | "riderName"
+  | "raceNumber";
+
+/** Returns the first missing field blocking add-to-cart, or null if ready. */
+export function getCartReadyIssue(
+  state: ConfiguratorState,
+): CartReadyIssue | null {
+  if (!state.bike?.brand || !state.bike.model || !state.bike.year) {
+    return "bike";
+  }
+  if (!state.selectedDesign) {
+    return "design";
+  }
+  if (!state.riderName.trim()) {
+    return "riderName";
+  }
+  if (!state.raceNumber.trim()) {
+    return "raceNumber";
+  }
+  return null;
+}
+
+export function cartReadyIssueMessage(issue: CartReadyIssue): string {
+  switch (issue) {
+    case "bike":
+      return "Moto manquante. Choisis ta moto avant d’ajouter au panier.";
+    case "design":
+      return "Design manquant. Choisis un design avant d’ajouter au panier.";
+    case "riderName":
+      return "Nom du pilote manquant. Renseigne ton nom avant d’ajouter au panier.";
+    case "raceNumber":
+      return "Numéro de course manquant. Renseigne ton numéro avant d’ajouter au panier.";
+  }
+}
+
 /** True when the configurator has enough data to request add-to-cart. */
 export function isConfigurationReadyForCart(state: ConfiguratorState): boolean {
-  return Boolean(
-    state.bike?.brand &&
-      state.bike.model &&
-      state.bike.year &&
-      state.selectedDesign &&
-      state.riderName.trim().length > 0 &&
-      state.raceNumber.trim().length > 0,
-  );
+  return getCartReadyIssue(state) === null;
 }
 
 export function formatLogoProminenceLine(logo: {
