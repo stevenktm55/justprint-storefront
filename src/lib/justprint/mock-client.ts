@@ -132,6 +132,11 @@ export async function mockCreateConfiguration(
     editToken,
     status: "draft",
     createdAt,
+    designId: draft.designId || null,
+    savedDesignState: {
+      values: {},
+      currentProductId: null,
+    },
   };
 }
 
@@ -210,6 +215,12 @@ export async function mockUpdateConfiguration(
     publicId: updated.publicId,
     status: updated.status,
     updatedAt: updated.updatedAt,
+    productId: null,
+    designId: updated.designId || null,
+    savedDesignState: {
+      values: {},
+      currentProductId: null,
+    },
   };
 }
 

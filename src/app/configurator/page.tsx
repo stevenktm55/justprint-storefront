@@ -32,12 +32,12 @@ function ConfiguratorPageContent() {
   return (
     <StorefrontTenantProvider shopId={resolution.shopId}>
       <ConfiguratorProvider>
-        <StorefrontProvider>
-          <PersistentStorefrontViewerProvider>
+        <PersistentStorefrontViewerProvider>
+          <StorefrontProvider>
             <StorefrontParentOriginProbe />
             <ConfiguratorShell />
-          </PersistentStorefrontViewerProvider>
-        </StorefrontProvider>
+          </StorefrontProvider>
+        </PersistentStorefrontViewerProvider>
       </ConfiguratorProvider>
     </StorefrontTenantProvider>
   );

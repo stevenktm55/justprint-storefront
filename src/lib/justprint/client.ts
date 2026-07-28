@@ -17,6 +17,7 @@ import {
   remoteCreateSavedDesign,
   remoteFinalizeSavedDesign,
   remoteGenerateConfigurationPreview,
+  remoteGetSavedDesign,
   remoteGetStorefrontBootstrap,
   remoteUpdateSavedDesign,
 } from "@/lib/justprint/remote-client";
@@ -76,6 +77,22 @@ export async function createSavedDesign(
 
 /** @deprecated Prefer createSavedDesign */
 export const createConfiguration = createSavedDesign;
+
+/**
+ * GET authentifié draft — uniquement côté parent Storefront (editToken).
+ * Jamais depuis l’iframe viewer.
+ */
+export async function getSavedDesign(
+  savedDesignId: string,
+  editToken: string,
+): Promise<UpdateConfigurationResponse> {
+  return withErrorBoundary(async () => {
+    if (isJustPrintMockMode()) {
+      return mockUpdateConfiguration(savedDesignId, editToken, {});
+    }
+    return remoteGetSavedDesign(savedDesignId, editToken);
+  });
+}
 
 export async function updateSavedDesign(
   savedDesignId: string,

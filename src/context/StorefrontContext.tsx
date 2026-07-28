@@ -11,22 +11,26 @@ import {
   type ReactNode,
 } from "react";
 import { useConfigurator } from "@/context/ConfiguratorContext";
+import { usePersistentStorefrontViewerOptional } from "@/context/PersistentStorefrontViewerContext";
 import { useStorefrontTenant } from "@/context/StorefrontTenantContext";
 import {
   buildCreateConfigurationBody,
   buildPatchConfigurationBody,
   createSavedDesign,
   finalizeSavedDesign,
+  getSavedDesign,
   getStorefrontBootstrap,
   isJustPrintError,
   updateSavedDesign,
 } from "@/lib/justprint-client";
+import { buildViewerRuntimeConfiguration } from "@/lib/justprint/viewer-runtime-config";
 import { logSavedDesignSync } from "@/lib/justprint/sync-log";
 import { hasValidServerConfiguration, saveDraft } from "@/lib/storage";
 import type { ConfiguratorState } from "@/types/configurator";
 import type {
   ConfigurationStatus,
   FinalizeSavedDesignResponse,
+  PublicSavedDesignState,
   StorefrontBootstrap,
   StorefrontColorLibrary,
   StorefrontDesign,
@@ -102,6 +106,7 @@ function buildSyncSignature(state: ConfiguratorState): string {
 export function StorefrontProvider({ children }: { children: ReactNode }) {
   const { state, dispatch } = useConfigurator();
   const { shopId, features, tenant } = useStorefrontTenant();
+  const viewerCtx = usePersistentStorefrontViewerOptional();
   const [bootstrap, setBootstrap] = useState<StorefrontBootstrap | null>(null);
   const [bootstrapStatus, setBootstrapStatus] =
     useState<BootstrapStatus>("idle");
@@ -132,6 +137,30 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
     publicId: string;
     editToken: string;
   } | null>(null);
+  const hydratedViewerFetchRef = useRef<string | null>(null);
+
+  const pushRuntimeConfigToViewer = useCallback(
+    (args: {
+      savedDesignId: string;
+      version: number;
+      designId: string | null | undefined;
+      productId?: string | null;
+      savedDesignState: PublicSavedDesignState | null | undefined;
+    }) => {
+      const configuration = buildViewerRuntimeConfiguration({
+        designId: args.designId,
+        productId: args.productId,
+        savedDesignState: args.savedDesignState,
+      });
+      if (!configuration || !viewerCtx) return;
+      viewerCtx.pushViewerRuntimeApply({
+        savedDesignId: args.savedDesignId,
+        version: args.version,
+        configuration,
+      });
+    },
+    [viewerCtx],
+  );
 
   useEffect(() => {
     latestStateRef.current = state;
@@ -307,6 +336,13 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
         };
         setSync("saved");
         const nextVersion = Math.max(1, draftState.synchronizationVersion + 1);
+        pushRuntimeConfigToViewer({
+          savedDesignId: draftState.savedDesignId,
+          version: nextVersion,
+          designId: result.designId ?? draftState.selectedDesign,
+          productId: result.productId,
+          savedDesignState: result.savedDesignState,
+        });
         if (process.env.NODE_ENV === "development") {
           console.info("[storefront/patch]", {
             designId: draftState.selectedDesign,
@@ -362,7 +398,7 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
         return false;
       }
     },
-    [dispatch, setSync, snapshotContext],
+    [dispatch, setSync, snapshotContext, pushRuntimeConfigToViewer],
   );
 
   const runSaveLoop = useCallback(async () => {
@@ -475,6 +511,14 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
             signature: createdSignature,
           };
 
+          pushRuntimeConfigToViewer({
+            savedDesignId,
+            version: 1,
+            designId: created.designId ?? draftState.selectedDesign,
+            productId: created.productId,
+            savedDesignState: created.savedDesignState,
+          });
+
           if (process.env.NODE_ENV === "development") {
             console.info("[storefront/create]", {
               designId: draftState.selectedDesign,
@@ -522,8 +566,55 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
       createPromiseRef.current = promise;
       return promise;
     },
-    [dispatch, setSync, snapshotContext],
+    [dispatch, setSync, snapshotContext, pushRuntimeConfigToViewer],
   );
+
+  // Draft restauré : le parent (avec editToken) lit le saved_design et pousse APPLY.
+  // L’iframe viewer ne fait jamais ce GET.
+  useEffect(() => {
+    const savedDesignId = state.savedDesignId;
+    const editToken = state.editToken;
+    if (!savedDesignId || !editToken || !state.selectedDesign) return;
+    if (hydratedViewerFetchRef.current === savedDesignId) return;
+    if (viewerCtx?.viewerRuntimeApply?.savedDesignId === savedDesignId) {
+      hydratedViewerFetchRef.current = savedDesignId;
+      return;
+    }
+
+    let cancelled = false;
+    hydratedViewerFetchRef.current = savedDesignId;
+    void (async () => {
+      try {
+        const view = await getSavedDesign(savedDesignId, editToken);
+        if (cancelled) return;
+        const version = Math.max(1, state.synchronizationVersion || 1);
+        pushRuntimeConfigToViewer({
+          savedDesignId,
+          version,
+          designId: view.designId ?? state.selectedDesign,
+          productId: view.productId,
+          savedDesignState: view.savedDesignState,
+        });
+      } catch (error) {
+        if (cancelled) return;
+        hydratedViewerFetchRef.current = null;
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[storefront/viewer-hydrate]", error);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    state.savedDesignId,
+    state.editToken,
+    state.selectedDesign,
+    state.synchronizationVersion,
+    pushRuntimeConfigToViewer,
+    viewerCtx?.viewerRuntimeApply?.savedDesignId,
+  ]);
 
   // Create draft once bike + design are known (including restored drafts).
   useEffect(() => {

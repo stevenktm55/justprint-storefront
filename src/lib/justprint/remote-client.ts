@@ -4,6 +4,7 @@ import { normalizeStorefrontBootstrap } from "@/lib/justprint/normalize-bootstra
 import type {
   CreateSavedDesignResponse,
   FinalizeSavedDesignResponse,
+  PublicSavedDesignState,
   StorefrontBootstrap,
   StorefrontConfigurationCreateBody,
   StorefrontConfigurationPatchBody,
@@ -18,6 +19,9 @@ type PublicSavedDesignView = {
   updatedAt?: string | null;
   finalized?: boolean;
   previewMode?: "2d" | "3d" | null;
+  productId?: string | null;
+  designId?: string | null;
+  savedDesignState?: PublicSavedDesignState | null;
 };
 
 function mapStatus(
@@ -29,6 +33,19 @@ function mapStatus(
   }
   if (status === "preview_ready") return "preview_ready";
   return "draft";
+}
+
+function mapUpdateView(view: PublicSavedDesignView): UpdateSavedDesignResponse {
+  return {
+    configurationId: view.configurationId,
+    publicId: view.publicId ?? "",
+    status: mapStatus(view.status, view.finalized),
+    updatedAt: view.updatedAt ?? new Date().toISOString(),
+    finalized: Boolean(view.finalized),
+    productId: view.productId ?? null,
+    designId: view.designId ?? null,
+    savedDesignState: view.savedDesignState ?? null,
+  };
 }
 
 /**
@@ -59,6 +76,24 @@ export async function remoteCreateSavedDesign(
   );
 }
 
+/**
+ * GET draft authentifié (editToken) — uniquement côté Storefront parent,
+ * jamais depuis l’iframe viewer.
+ */
+export async function remoteGetSavedDesign(
+  savedDesignId: string,
+  editToken: string,
+): Promise<UpdateSavedDesignResponse> {
+  const view = await justPrintFetch<PublicSavedDesignView>(
+    `/api/storefront/saved-designs/${encodeURIComponent(savedDesignId)}`,
+    {
+      method: "GET",
+      editToken,
+    },
+  );
+  return mapUpdateView(view);
+}
+
 export async function remoteUpdateSavedDesign(
   savedDesignId: string,
   editToken: string,
@@ -73,13 +108,7 @@ export async function remoteUpdateSavedDesign(
     },
   );
 
-  return {
-    configurationId: view.configurationId,
-    publicId: view.publicId ?? "",
-    status: mapStatus(view.status, view.finalized),
-    updatedAt: view.updatedAt ?? new Date().toISOString(),
-    finalized: Boolean(view.finalized),
-  };
+  return mapUpdateView(view);
 }
 
 export async function remoteFinalizeSavedDesign(

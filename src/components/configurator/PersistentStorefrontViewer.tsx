@@ -143,6 +143,7 @@ export function PersistentStorefrontViewer() {
     hasAnchor,
     metrics,
     bumpMetric,
+    viewerRuntimeApply,
   } = usePersistentStorefrontViewer();
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -359,8 +360,8 @@ export function PersistentStorefrontViewer() {
     anchorBox,
   ]);
 
-  // LOAD / REFRESH saved design — never change iframe src.
-  // version must be an integer ≥ 1 (viewer rejects ISO timestamps / editToken).
+  // LOAD / REFRESH — compat uniquement (prépare l’iframe, ne doit plus déclencher de GET).
+  // L’application réelle passe par JUSTPRINT_APPLY_RUNTIME_CONFIG.
   useEffect(() => {
     if (!src || !iframeReadyForMessages) return;
     const savedDesignId = state.savedDesignId;
@@ -409,6 +410,33 @@ export function PersistentStorefrontViewer() {
     postToViewer,
     bumpMetric,
   ]);
+
+  // Applique la configuration runtime (SavedDesignConfigState public) via postMessage.
+  // Jamais d’editToken, jamais de GET depuis l’iframe.
+  useEffect(() => {
+    if (!src || !iframeReadyForMessages) return;
+    if (!viewerRuntimeApply) return;
+
+    postToViewer({
+      type: "JUSTPRINT_APPLY_RUNTIME_CONFIG",
+      savedDesignId: viewerRuntimeApply.savedDesignId,
+      version: viewerRuntimeApply.version,
+      configuration: viewerRuntimeApply.configuration,
+    });
+    loadedDesignIdRef.current = viewerRuntimeApply.savedDesignId;
+    lastSyncVersionRef.current = String(viewerRuntimeApply.version);
+    if (IS_DEV) {
+      console.info("[PersistentStorefrontViewer] APPLY_RUNTIME_CONFIG", {
+        savedDesignId: viewerRuntimeApply.savedDesignId,
+        version: viewerRuntimeApply.version,
+        productId: viewerRuntimeApply.configuration.currentProductId,
+        designId: viewerRuntimeApply.configuration.designId,
+        slots: Object.keys(viewerRuntimeApply.configuration.values).filter((k) =>
+          k.startsWith("color-slot-"),
+        ).length,
+      });
+    }
+  }, [src, iframeReadyForMessages, viewerRuntimeApply, postToViewer]);
 
   // Inbound messages — strict origin + source checks.
   useEffect(() => {

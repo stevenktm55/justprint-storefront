@@ -12,6 +12,7 @@ import {
 } from "react";
 import type {
   StorefrontViewerDisplayMode,
+  StorefrontViewerRuntimeConfiguration,
   StorefrontViewerStatus,
 } from "@/types/justprint";
 
@@ -21,6 +22,13 @@ export interface ViewerDevMetrics {
   loadSavedDesignMessages: number;
   fullOpens: number;
 }
+
+/** Payload prêt pour JUSTPRINT_APPLY_RUNTIME_CONFIG (jamais d’editToken). */
+export type ViewerRuntimeApplyPayload = {
+  savedDesignId: string;
+  version: number;
+  configuration: StorefrontViewerRuntimeConfiguration;
+};
 
 interface PersistentStorefrontViewerContextValue {
   viewerStatus: StorefrontViewerStatus;
@@ -38,6 +46,10 @@ interface PersistentStorefrontViewerContextValue {
   hasAnchor: boolean;
   metrics: ViewerDevMetrics;
   bumpMetric: (key: keyof ViewerDevMetrics) => void;
+  /** Dernière config runtime à pousser vers l’iframe (postMessage). */
+  viewerRuntimeApply: ViewerRuntimeApplyPayload | null;
+  pushViewerRuntimeApply: (payload: ViewerRuntimeApplyPayload) => void;
+  clearViewerRuntimeApply: () => void;
 }
 
 const PersistentStorefrontViewerContext =
@@ -55,6 +67,8 @@ export function PersistentStorefrontViewerProvider({
   const [viewerError, setViewerError] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [hasAnchor, setHasAnchor] = useState(false);
+  const [viewerRuntimeApply, setViewerRuntimeApply] =
+    useState<ViewerRuntimeApplyPayload | null>(null);
   const anchorRef = useRef<HTMLElement | null>(null);
   const [metrics, setMetrics] = useState<ViewerDevMetrics>({
     iframeMounts: 0,
@@ -82,6 +96,17 @@ export function PersistentStorefrontViewerProvider({
     setMetrics((prev) => ({ ...prev, [key]: prev[key] + 1 }));
   }, []);
 
+  const pushViewerRuntimeApply = useCallback(
+    (payload: ViewerRuntimeApplyPayload) => {
+      setViewerRuntimeApply(payload);
+    },
+    [],
+  );
+
+  const clearViewerRuntimeApply = useCallback(() => {
+    setViewerRuntimeApply(null);
+  }, []);
+
   const value = useMemo(
     () => ({
       viewerStatus,
@@ -98,6 +123,9 @@ export function PersistentStorefrontViewerProvider({
       hasAnchor,
       metrics,
       bumpMetric,
+      viewerRuntimeApply,
+      pushViewerRuntimeApply,
+      clearViewerRuntimeApply,
     }),
     [
       viewerStatus,
@@ -110,6 +138,9 @@ export function PersistentStorefrontViewerProvider({
       hasAnchor,
       metrics,
       bumpMetric,
+      viewerRuntimeApply,
+      pushViewerRuntimeApply,
+      clearViewerRuntimeApply,
     ],
   );
 

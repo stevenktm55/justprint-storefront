@@ -298,11 +298,34 @@ export interface CreateSavedDesignResponse {
   status: ConfigurationStatus | string;
   createdAt: string;
   productId?: string;
+  designId?: string | null;
   warnings?: string[];
+  /** État public pour le viewer (postMessage) — jamais d’editToken. */
+  savedDesignState?: PublicSavedDesignState | null;
 }
 
 /** @deprecated Prefer CreateSavedDesignResponse */
 export type CreateConfigurationResponse = CreateSavedDesignResponse;
+
+/** Sous-ensemble public de SavedDesignConfigState (JustPrint). */
+export interface PublicSavedDesignState {
+  values: Record<string, unknown>;
+  currentProductId: string | null;
+  textOverrides?: Record<string, unknown>;
+  logoOverrides?: Record<string, unknown>;
+}
+
+/**
+ * Configuration runtime publique pour JUSTPRINT_APPLY_RUNTIME_CONFIG.
+ * Dérivée de SavedDesignConfigState + designId — jamais d’editToken.
+ */
+export interface StorefrontViewerRuntimeConfiguration {
+  currentProductId: string;
+  designId: string;
+  values: Record<string, unknown>;
+  textOverrides?: Record<string, unknown>;
+  logoOverrides?: Record<string, unknown>;
+}
 
 export interface UpdateSavedDesignResponse {
   configurationId: string;
@@ -310,6 +333,9 @@ export interface UpdateSavedDesignResponse {
   status: ConfigurationStatus | string;
   updatedAt: string;
   finalized?: boolean;
+  productId?: string | null;
+  designId?: string | null;
+  savedDesignState?: PublicSavedDesignState | null;
 }
 
 /** @deprecated Prefer UpdateSavedDesignResponse */
@@ -407,6 +433,12 @@ export type JustPrintViewerOutboundMessage =
       type: "JUSTPRINT_REFRESH_SAVED_DESIGN";
       savedDesignId: string;
       version: number;
+    }
+  | {
+      type: "JUSTPRINT_APPLY_RUNTIME_CONFIG";
+      savedDesignId: string;
+      version: number;
+      configuration: StorefrontViewerRuntimeConfiguration;
     }
   | {
       type: "JUSTPRINT_SET_DISPLAY_MODE";

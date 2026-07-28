@@ -7,6 +7,7 @@ export {
   getStorefrontBootstrap,
   createSavedDesign,
   createConfiguration,
+  getSavedDesign,
   updateSavedDesign,
   updateConfiguration,
   finalizeSavedDesign,
