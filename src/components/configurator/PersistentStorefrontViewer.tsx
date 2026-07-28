@@ -65,6 +65,8 @@ interface AnchorBox {
   height: number;
 }
 
+const GESTURE_HINT_SESSION_KEY = "rm-viewer-gesture-hint-seen";
+
 function buildCompactStyle(box: AnchorBox): CSSProperties {
   return {
     top: box.top,
@@ -78,7 +80,7 @@ function buildCompactStyle(box: AnchorBox): CSSProperties {
     opacity: 1,
     visibility: "visible",
     transform: "none",
-    pointerEvents: "none",
+    pointerEvents: "auto",
     zIndex: 35,
   };
 }
@@ -156,6 +158,7 @@ export function PersistentStorefrontViewer() {
   const [lastCompactBox, setLastCompactBox] = useState<AnchorBox | null>(null);
   const [sessionSrc, setSessionSrc] = useState<string | null>(null);
   const [iframeReadyForMessages, setIframeReadyForMessages] = useState(false);
+  const [showGestureHint, setShowGestureHint] = useState(false);
 
   const previewMode = getBikePreviewMode(state.bike);
   const active = shouldUsePersistent3dViewer({
@@ -272,6 +275,36 @@ export function PersistentStorefrontViewer() {
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [viewerDisplayMode, collapseViewer]);
+
+  const dismissGestureHint = useCallback(() => {
+    setShowGestureHint(false);
+    try {
+      sessionStorage.setItem(GESTURE_HINT_SESSION_KEY, "1");
+    } catch {
+      // Ignore quota / private mode.
+    }
+  }, []);
+
+  // Show the compact gesture tip once per session (deferred to satisfy lint / avoid hydration mismatch).
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      try {
+        if (sessionStorage.getItem(GESTURE_HINT_SESSION_KEY) !== "1") {
+          setShowGestureHint(true);
+        }
+      } catch {
+        setShowGestureHint(true);
+      }
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, []);
+
+  // Auto-hide the compact gesture tip after a few seconds (also dismissed on Agrandir).
+  useEffect(() => {
+    if (viewerDisplayMode !== "compact" || !showGestureHint) return;
+    const timer = window.setTimeout(() => dismissGestureHint(), 4500);
+    return () => window.clearTimeout(timer);
+  }, [viewerDisplayMode, showGestureHint, dismissGestureHint]);
 
   const postToViewer = useCallback(
     (message: JustPrintViewerOutboundMessage) => {
@@ -543,16 +576,21 @@ export function PersistentStorefrontViewer() {
           <>
             <button
               type="button"
-              className="pointer-events-auto absolute right-2 top-2 z-[3] inline-flex h-8 items-center gap-1 rounded-[var(--rm-radius-sm)] bg-black/55 px-2 text-[11px] font-semibold text-white"
+              className="viewer-expand-button pointer-events-auto absolute right-2 top-2 z-[3] inline-flex h-8 items-center gap-1 rounded-[var(--rm-radius-sm)] bg-black/55 px-2 text-[11px] font-semibold text-white"
               aria-label="Agrandir l’aperçu 3D"
-              onClick={expandViewer}
+              onClick={() => {
+                dismissGestureHint();
+                expandViewer();
+              }}
             >
               <Maximize2 size={14} />
               Agrandir
             </button>
-            <p className="pointer-events-none absolute inset-x-0 bottom-2 z-[2] text-center text-[10px] font-medium text-white/80 drop-shadow">
-              Appuie pour agrandir
-            </p>
+            {showGestureHint ? (
+              <p className="pointer-events-none absolute inset-x-0 bottom-2 z-[2] px-3 text-center text-[10px] font-medium text-white/85 drop-shadow">
+                Fais glisser pour tourner · Pince pour zoomer
+              </p>
+            ) : null}
           </>
         ) : null}
 

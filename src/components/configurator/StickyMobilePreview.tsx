@@ -26,8 +26,7 @@ interface StickyMobilePreviewProps {
  */
 export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
   const { state } = useConfigurator();
-  const { expandViewer, viewerStatus, isExpanded } =
-    usePersistentStorefrontViewer();
+  const { viewerStatus, isExpanded } = usePersistentStorefrontViewer();
   const [collapsedByStep, setCollapsedByStep] = useState<
     Partial<Record<ConfiguratorStep, boolean>>
   >({});
@@ -69,23 +68,12 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
       : "Préparation de ton aperçu…";
 
   // Persistent 3D — layout slot only; the single iframe lives in PersistentStorefrontViewer.
+  // Do not wrap the slot in a click-to-expand hit target: the iframe handles rotate/zoom.
   if (persistent3d) {
     return (
       <div className="viewer-compact-slot shrink-0 border-b border-[var(--rm-border)]">
         <div className="px-4 pb-2 pt-2">
-          <div
-            className="viewer-compact relative w-full"
-            role="button"
-            tabIndex={0}
-            aria-label="Agrandir l’aperçu 3D"
-            onClick={expandViewer}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                expandViewer();
-              }
-            }}
-          >
+          <div className="viewer-compact relative w-full">
             <ViewerAnchor
               className="h-full w-full"
               label="Aperçu 3D compact"
