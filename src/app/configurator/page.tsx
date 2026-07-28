@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { ConfiguratorShell } from "@/components/configurator/ConfiguratorShell";
 import { ShopErrorScreen } from "@/components/storefront/ShopErrorScreen";
 import { ConfiguratorProvider } from "@/context/ConfiguratorContext";
+import { PersistentStorefrontViewerProvider } from "@/context/PersistentStorefrontViewerContext";
 import { StorefrontProvider } from "@/context/StorefrontContext";
 import { StorefrontTenantProvider } from "@/context/StorefrontTenantContext";
 import { resolveShopParam } from "@/tenants";
@@ -31,7 +32,9 @@ function ConfiguratorPageContent() {
     <StorefrontTenantProvider shopId={resolution.shopId}>
       <ConfiguratorProvider>
         <StorefrontProvider>
-          <ConfiguratorShell />
+          <PersistentStorefrontViewerProvider>
+            <ConfiguratorShell />
+          </PersistentStorefrontViewerProvider>
         </StorefrontProvider>
       </ConfiguratorProvider>
     </StorefrontTenantProvider>

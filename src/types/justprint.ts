@@ -240,21 +240,66 @@ export interface CompletedConfiguration {
   pieceIds?: string[];
 }
 
+/** Statut du viewer 3D persistant côté Storefront. */
+export type StorefrontViewerStatus =
+  | "idle"
+  | "preloading"
+  | "model-ready"
+  | "applying-design"
+  | "ready"
+  | "error";
+
+/** Mode d’affichage du conteneur iframe unique. */
+export type StorefrontViewerDisplayMode = "background" | "compact" | "full";
+
 /** Messages postMessage émis par l’iframe d’aperçu JustPrint. */
 export type JustPrintPreviewMessage =
   | {
+      type: "JUSTPRINT_MODEL_PRELOAD_STARTED";
+      bikeId?: string;
+    }
+  | {
+      type: "JUSTPRINT_MODEL_PRELOADED";
+      bikeId?: string;
+    }
+  | {
+      type: "JUSTPRINT_SAVED_DESIGN_APPLYING";
+      savedDesignId?: string;
+      configurationId?: string;
+    }
+  | {
       type: "JUSTPRINT_PREVIEW_READY";
-      configurationId: string;
+      configurationId?: string;
+      savedDesignId?: string;
     }
   | {
       type: "JUSTPRINT_PREVIEW_UPDATED";
-      configurationId: string;
+      configurationId?: string;
+      savedDesignId?: string;
       previewUrl?: string;
     }
   | {
       type: "JUSTPRINT_PREVIEW_ERROR";
-      configurationId: string;
+      configurationId?: string;
+      savedDesignId?: string;
       message: string;
+    };
+
+/** Messages sortants Storefront → iframe viewer persistant. */
+export type JustPrintViewerOutboundMessage =
+  | {
+      type: "JUSTPRINT_LOAD_SAVED_DESIGN";
+      savedDesignId: string;
+      version: string;
+    }
+  | {
+      type: "JUSTPRINT_REFRESH_SAVED_DESIGN";
+      savedDesignId: string;
+      version: string;
+    }
+  | {
+      type: "JUSTPRINT_SET_DISPLAY_MODE";
+      mode: StorefrontViewerDisplayMode;
     };
 
 /** @deprecated Prefer StorefrontConfigurationCreateBody + snapshot builder */

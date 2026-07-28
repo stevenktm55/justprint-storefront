@@ -3,10 +3,15 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp, Maximize2 } from "lucide-react";
 import { JustPrintEmbeddedPreview } from "@/components/configurator/JustPrintEmbeddedPreview";
+import { ViewerAnchor } from "@/components/configurator/ViewerAnchor";
 import { useConfigurator } from "@/context/ConfiguratorContext";
+import { usePersistentStorefrontViewer } from "@/context/PersistentStorefrontViewerContext";
 import { getBikePreviewMode } from "@/lib/bike-preview";
 import { isJustPrintMockMode } from "@/lib/justprint-client";
-import { resolveRemotePreviewKind } from "@/lib/justprint/preview-embed";
+import {
+  resolveRemotePreviewKind,
+  shouldUsePersistent3dViewer,
+} from "@/lib/justprint/preview-embed";
 import type { ConfiguratorStep } from "@/types/configurator";
 
 interface StickyMobilePreviewProps {
@@ -14,17 +19,23 @@ interface StickyMobilePreviewProps {
 }
 
 /**
- * Vignette sticky (steps Personnalisation / Logos).
- * En remote 3D : mode lite (pas de 2ᵉ moteur) + « Agrandir l’aperçu » pour
- * monter l’unique iframe plein écran.
+ * Vignette sticky (Design → Logos).
+ * En 3D remote : chrome + ancre pour le viewer persistant (pas d’iframe ici).
+ * En mock / 2D : JustPrintEmbeddedPreview local ou embed legacy.
  */
 export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
   const { state } = useConfigurator();
+  const { expandViewer, viewerStatus, isExpanded } =
+    usePersistentStorefrontViewer();
   const [collapsedByStep, setCollapsedByStep] = useState<
     Partial<Record<ConfiguratorStep, boolean>>
   >({});
-  const [expanded, setExpanded] = useState(false);
+  const [legacyExpanded, setLegacyExpanded] = useState(false);
   const mode = getBikePreviewMode(state.bike);
+  const persistent3d = shouldUsePersistent3dViewer({
+    isMockMode: isJustPrintMockMode(),
+    previewMode: mode,
+  });
   const kind = resolveRemotePreviewKind({
     isMockMode: isJustPrintMockMode(),
     bikeId: state.bike?.id,
@@ -34,6 +45,7 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
   });
 
   const useLiteStrip =
+    !persistent3d &&
     !isJustPrintMockMode() &&
     (kind === "remote_iframe" ||
       kind === "remote_2d" ||
@@ -50,18 +62,25 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
 
   if (!visible) return null;
 
+  const statusHint =
+    viewerStatus === "ready" || viewerStatus === "model-ready"
+      ? "Aperçu prêt"
+      : "Préparation de la moto…";
+
   return (
     <>
       <div className="sticky top-0 z-20 shrink-0 border-b border-[var(--rm-border)] bg-[var(--rm-bg)]">
         <div className="flex items-center justify-between gap-2 px-4 pt-2">
           <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--rm-text-muted)]">
-            Aperçu live · {mode === "3d" ? "3D" : "2D"}
+            {persistent3d ? "Ton aperçu 3D" : `Aperçu live · ${mode === "3d" ? "3D" : "2D"}`}
           </p>
           <div className="flex items-center gap-1">
             {!collapsed ? (
               <button
                 type="button"
-                onClick={() => setExpanded(true)}
+                onClick={() =>
+                  persistent3d ? expandViewer() : setLegacyExpanded(true)
+                }
                 className="inline-flex h-9 items-center gap-1 rounded-[var(--rm-radius-sm)] px-2 text-[11px] font-semibold text-[var(--rm-text-muted)]"
                 aria-label="Agrandir l’aperçu"
               >
@@ -83,12 +102,17 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
 
         {!collapsed ? (
           <div className="px-4 pb-2 pt-1">
-            <div className="h-[188px] overflow-hidden rounded-[var(--rm-radius-sm)] border border-[var(--rm-border)] bg-[var(--rm-surface)] sm:h-[200px]">
-              {/*
-                expanded → iframe plein écran uniquement (une instance 3D).
-                Sinon lite en remote, ou mock local compact.
-              */}
-              {!expanded ? (
+            <div className="h-[140px] overflow-hidden rounded-[var(--rm-radius-sm)] border border-[var(--rm-border)] bg-[var(--rm-surface)] sm:h-[150px]">
+              {persistent3d ? (
+                isExpanded ? (
+                  <div className="flex h-full flex-col items-center justify-center gap-1 text-xs text-[var(--rm-text-muted)]">
+                    <span>Aperçu agrandi</span>
+                    <span className="text-[10px]">{statusHint}</span>
+                  </div>
+                ) : (
+                  <ViewerAnchor className="h-full w-full" label="Aperçu 3D compact" />
+                )
+              ) : !legacyExpanded ? (
                 <JustPrintEmbeddedPreview
                   configurationId={state.savedDesignId}
                   previewMode={mode}
@@ -98,7 +122,7 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
                   showStatus={false}
                   compact={mode === "2d"}
                   className="h-full"
-                  onExpandRequest={() => setExpanded(true)}
+                  onExpandRequest={() => setLegacyExpanded(true)}
                 />
               ) : (
                 <div className="flex h-full items-center justify-center text-xs text-[var(--rm-text-muted)]">
@@ -125,7 +149,7 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
         )}
       </div>
 
-      {expanded ? (
+      {!persistent3d && legacyExpanded ? (
         <div className="fixed inset-0 z-[90] flex h-[100dvh] flex-col bg-[var(--rm-bg)]">
           <div className="flex items-center justify-between gap-2 border-b border-[var(--rm-border)] px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
             <p className="text-sm font-bold uppercase tracking-wide">
@@ -134,7 +158,7 @@ export function StickyMobilePreview({ visible }: StickyMobilePreviewProps) {
             <button
               type="button"
               className="rm-btn-secondary h-10 min-h-10 w-auto px-3 text-sm"
-              onClick={() => setExpanded(false)}
+              onClick={() => setLegacyExpanded(false)}
             >
               Fermer
             </button>

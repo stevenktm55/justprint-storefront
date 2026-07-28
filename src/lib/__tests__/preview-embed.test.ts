@@ -3,8 +3,10 @@ import {
   REMOTE_PILOT_BIKE_ID,
   REMOTE_PILOT_DESIGN_ID,
   buildStorefrontPreviewEmbedUrl,
+  buildStorefrontViewerEmbedUrl,
   isRemotePilot3dSupported,
   resolveRemotePreviewKind,
+  shouldUsePersistent3dViewer,
 } from "@/lib/justprint/preview-embed";
 
 describe("isRemotePilot3dSupported", () => {
@@ -21,6 +23,20 @@ describe("isRemotePilot3dSupported", () => {
     ).toBe(false);
     expect(
       isRemotePilot3dSupported("other-bike", REMOTE_PILOT_DESIGN_ID, "3d"),
+    ).toBe(false);
+  });
+});
+
+describe("shouldUsePersistent3dViewer", () => {
+  it("enables for remote 3d only", () => {
+    expect(
+      shouldUsePersistent3dViewer({ isMockMode: false, previewMode: "3d" }),
+    ).toBe(true);
+    expect(
+      shouldUsePersistent3dViewer({ isMockMode: false, previewMode: "2d" }),
+    ).toBe(false);
+    expect(
+      shouldUsePersistent3dViewer({ isMockMode: true, previewMode: "3d" }),
     ).toBe(false);
   });
 });
@@ -98,13 +114,33 @@ describe("buildStorefrontPreviewEmbedUrl", () => {
       view: "left",
     });
 
-    expect(url.startsWith(
-      "https://www.justprint.app/embed/storefront-preview/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee?",
-    )).toBe(true);
+    expect(
+      url.startsWith(
+        "https://www.justprint.app/embed/storefront-preview/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee?",
+      ),
+    ).toBe(true);
     expect(url).toContain("token=secret-token");
     expect(url).toContain("v=2026-07-28T10%3A00%3A00.000Z");
     expect(url).toContain("parentOrigin=https%3A%2F%2Fstorefront.example");
     expect(url).toContain("view=left");
     expect(url).not.toContain("JP-RM-");
+  });
+});
+
+describe("buildStorefrontViewerEmbedUrl", () => {
+  it("builds stable shop+bike URL without savedDesign or version", () => {
+    const url = buildStorefrontViewerEmbedUrl({
+      apiUrl: "https://www.justprint.app",
+      shopId: "rawmoto",
+      bikeId: "yamaha-450-yzf-2025",
+    });
+
+    expect(url).toBe(
+      "https://www.justprint.app/embed/storefront-viewer?shop=rawmoto&bike=yamaha-450-yzf-2025",
+    );
+    expect(url).not.toContain("savedDesign");
+    expect(url).not.toContain("token=");
+    expect(url).not.toContain("v=");
+    expect(url).not.toContain("view=");
   });
 });

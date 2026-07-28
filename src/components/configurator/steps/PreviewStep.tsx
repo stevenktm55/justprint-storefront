@@ -8,9 +8,11 @@ import {
   Minimize2,
 } from "lucide-react";
 import { JustPrintEmbeddedPreview } from "@/components/configurator/JustPrintEmbeddedPreview";
+import { ViewerAnchor } from "@/components/configurator/ViewerAnchor";
 import { BottomSheet } from "@/components/configurator/ui/BottomSheet";
 import { SummaryRow } from "@/components/configurator/ui/SummaryRow";
 import { useConfigurator } from "@/context/ConfiguratorContext";
+import { usePersistentStorefrontViewer } from "@/context/PersistentStorefrontViewerContext";
 import {
   formatBikeLabel,
   formatLogoProminenceLine,
@@ -21,6 +23,8 @@ import {
   getBikePreviewMode,
   previewModeHelpText,
 } from "@/lib/bike-preview";
+import { isJustPrintMockMode } from "@/lib/justprint-client";
+import { shouldUsePersistent3dViewer } from "@/lib/justprint/preview-embed";
 import { sortLogosByProminence } from "@/lib/logo-prominence";
 import { getDisplayConfigurationId } from "@/lib/storage";
 import type { ConfiguratorStep, PreviewView } from "@/types/configurator";
@@ -46,17 +50,23 @@ export function PreviewStep({
   saving = false,
 }: PreviewStepProps) {
   const { state, dispatch } = useConfigurator();
+  const { expandViewer, isExpanded, viewerStatus } =
+    usePersistentStorefrontViewer();
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [studioOpen, setStudioOpen] = useState(false);
   const mode = getBikePreviewMode(state.bike);
+  const persistent3d = shouldUsePersistent3dViewer({
+    isMockMode: isJustPrintMockMode(),
+    previewMode: mode,
+  });
 
   const goToStep = (step: ConfiguratorStep) => {
     dispatch({ type: "SET_STEP", payload: step });
   };
 
   useEffect(() => {
-    if (!previewExpanded) return;
+    if (!previewExpanded || persistent3d) return;
 
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -72,7 +82,12 @@ export function PreviewStep({
       document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [previewExpanded]);
+  }, [previewExpanded, persistent3d]);
+
+  const statusHint =
+    viewerStatus === "ready" || viewerStatus === "model-ready"
+      ? "Aperçu prêt"
+      : "Préparation de la moto…";
 
   const viewButtons =
     mode === "3d" ? (
@@ -127,7 +142,21 @@ export function PreviewStep({
       </div>
 
       <div className="relative">
-        {!previewExpanded ? (
+        {persistent3d ? (
+          <div className="h-[min(52vh,420px)] min-h-[240px] overflow-hidden rounded-[var(--rm-radius)] border border-[var(--rm-border)] bg-[var(--rm-surface)]">
+            {isExpanded ? (
+              <div className="flex h-full flex-col items-center justify-center gap-1 text-xs text-[var(--rm-text-muted)]">
+                <span>Aperçu agrandi</span>
+                <span className="text-[10px]">{statusHint}</span>
+              </div>
+            ) : (
+              <ViewerAnchor
+                className="h-full w-full"
+                label="Aperçu 3D final"
+              />
+            )}
+          </div>
+        ) : !previewExpanded ? (
           <JustPrintEmbeddedPreview
             configurationId={state.savedDesignId}
             previewMode={mode}
@@ -141,7 +170,9 @@ export function PreviewStep({
         )}
         <button
           type="button"
-          onClick={() => setPreviewExpanded(true)}
+          onClick={() =>
+            persistent3d ? expandViewer() : setPreviewExpanded(true)
+          }
           className="absolute bottom-2 left-2 inline-flex h-10 items-center gap-1.5 rounded-[var(--rm-radius-sm)] bg-black/70 px-2.5 text-xs font-semibold text-white"
           aria-label="Agrandir l’aperçu"
         >
@@ -254,7 +285,7 @@ export function PreviewStep({
         </button>
       </div>
 
-      {previewExpanded ? (
+      {!persistent3d && previewExpanded ? (
         <div className="fixed inset-0 z-[100] flex h-[100dvh] flex-col bg-[var(--rm-bg)]">
           <div className="relative flex items-center justify-center px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-2">
             <p className="font-display text-sm font-bold tracking-wide text-[var(--rm-text-muted)]">

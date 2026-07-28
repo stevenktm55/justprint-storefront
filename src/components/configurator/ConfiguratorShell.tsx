@@ -11,6 +11,7 @@ import {
 } from "@/components/configurator/RestoreDraftNotice";
 import { StickyActionBar } from "@/components/configurator/StickyActionBar";
 import { StickyMobilePreview } from "@/components/configurator/StickyMobilePreview";
+import { PersistentStorefrontViewer } from "@/components/configurator/PersistentStorefrontViewer";
 import { BottomSheet } from "@/components/configurator/ui/BottomSheet";
 import { SummaryRow } from "@/components/configurator/ui/SummaryRow";
 import {
@@ -185,7 +186,9 @@ export function ConfiguratorShell() {
   }, [allowedParentOrigins]);
 
   const showStickyMobilePreview =
-    state.currentStep === 3 || state.currentStep === 4;
+    state.currentStep === 2 ||
+    state.currentStep === 3 ||
+    state.currentStep === 4;
 
   const canProceed = useMemo(() => {
     switch (state.currentStep) {
@@ -499,7 +502,8 @@ export function ConfiguratorShell() {
         onDismiss={dismissIncompatibleDraftNotice}
       />
 
-      {/* Une seule surface d’aperçu montée : sticky mobile XOR desktop. */}
+      {/* Une seule iframe 3D montée ici ; sticky / desktop / final = ancres CSS. */}
+      <PersistentStorefrontViewer />
       <StickyMobilePreview visible={showStickyMobilePreview && !isLargeScreen} />
 
       <div className="mx-auto flex min-h-0 w-full max-w-[var(--rm-max-width)] flex-1 flex-col overflow-hidden lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-6 lg:px-4 lg:pt-4">

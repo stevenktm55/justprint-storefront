@@ -67,6 +67,7 @@ export interface BuildStorefrontPreviewEmbedUrlArgs {
 /**
  * URL d’embed JustPrint — UUID `saved_designs.id`, pas le publicId JP-RM-….
  * Route réelle : `/embed/storefront-preview/:savedDesignId`
+ * (2D / legacy — le 3D persistant utilise `buildStorefrontViewerEmbedUrl`.)
  */
 export function buildStorefrontPreviewEmbedUrl(
   args: BuildStorefrontPreviewEmbedUrlArgs,
@@ -88,4 +89,37 @@ export function buildStorefrontPreviewEmbedUrl(
     params.set("view", args.view);
   }
   return `${path}?${params.toString()}`;
+}
+
+export interface BuildStorefrontViewerEmbedUrlArgs {
+  shopId: string;
+  bikeId: string;
+  apiUrl?: string;
+}
+
+/**
+ * URL du viewer 3D persistant JustPrint.
+ * Stable tant que `shop` + `bike` ne changent pas — pas de savedDesignId,
+ * version, display mode ni cache-bust dans le `src`.
+ */
+export function buildStorefrontViewerEmbedUrl(
+  args: BuildStorefrontViewerEmbedUrlArgs,
+): string {
+  const apiUrl = (args.apiUrl ?? getJustPrintEnvironment().apiUrl).replace(
+    /\/$/,
+    "",
+  );
+  const params = new URLSearchParams({
+    shop: args.shopId,
+    bike: args.bikeId,
+  });
+  return `${apiUrl}/embed/storefront-viewer?${params.toString()}`;
+}
+
+/** Viewer 3D persistant : remote + moto 3D (pas de mock, pas de 2D). */
+export function shouldUsePersistent3dViewer(args: {
+  isMockMode: boolean;
+  previewMode: PreviewMode;
+}): boolean {
+  return !args.isMockMode && args.previewMode === "3d";
 }

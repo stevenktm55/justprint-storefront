@@ -45,6 +45,9 @@ function isJustPrintPreviewMessage(
   if (typeof data !== "object" || data === null) return false;
   const record = data as Record<string, unknown>;
   return (
+    record.type === "JUSTPRINT_MODEL_PRELOAD_STARTED" ||
+    record.type === "JUSTPRINT_MODEL_PRELOADED" ||
+    record.type === "JUSTPRINT_SAVED_DESIGN_APPLYING" ||
     record.type === "JUSTPRINT_PREVIEW_READY" ||
     record.type === "JUSTPRINT_PREVIEW_UPDATED" ||
     record.type === "JUSTPRINT_PREVIEW_ERROR"
@@ -222,6 +225,8 @@ export function JustPrintEmbeddedPreview({
       if (!isJustPrintPreviewMessage(event.data)) return;
       if (
         configurationId &&
+        "configurationId" in event.data &&
+        event.data.configurationId &&
         event.data.configurationId !== configurationId
       ) {
         return;
